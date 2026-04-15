@@ -104,11 +104,20 @@ STATUS_LABELS: dict[str, str] = {
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS customer_orders (
-    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-    customer_order_no    TEXT UNIQUE NOT NULL,
-    customer             TEXT NOT NULL,
-    expected_delivery_at DATETIME,
-    created_at           DATETIME DEFAULT CURRENT_TIMESTAMP
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_order_no       TEXT UNIQUE NOT NULL,
+    customer                TEXT NOT NULL,
+    expected_delivery_at    DATETIME,
+    payment_request_sent    INTEGER DEFAULT 0,
+    production_notified     INTEGER DEFAULT 0,
+    prod_pickup_requested   INTEGER DEFAULT 0,
+    prod_delivery_confirmed INTEGER DEFAULT 0,
+    salg_pickup_requested   INTEGER DEFAULT 0,
+    salg_delivery_confirmed INTEGER DEFAULT 0,
+    holdeplads              TEXT,
+    produced_at             DATETIME,
+    qc_result               TEXT,
+    created_at              DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS orders (
@@ -214,6 +223,19 @@ def init_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "orders", "quantity",            "INTEGER DEFAULT 1")
     _add_column_if_missing(conn, "orders", "customer_rating",     "INTEGER")
     _add_column_if_missing(conn, "orders", "customer_order_no",   "TEXT")
+    # KO-level flow flags
+    for col, typ in [
+        ("payment_request_sent",    "INTEGER DEFAULT 0"),
+        ("production_notified",     "INTEGER DEFAULT 0"),
+        ("prod_pickup_requested",   "INTEGER DEFAULT 0"),
+        ("prod_delivery_confirmed", "INTEGER DEFAULT 0"),
+        ("salg_pickup_requested",   "INTEGER DEFAULT 0"),
+        ("salg_delivery_confirmed", "INTEGER DEFAULT 0"),
+        ("holdeplads",              "TEXT"),
+        ("produced_at",             "DATETIME"),
+        ("qc_result",               "TEXT"),
+    ]:
+        _add_column_if_missing(conn, "customer_orders", col, typ)
 
     # Reseed component prices if the catalogue has changed (check for new varenumre)
     existing = {

@@ -155,20 +155,19 @@
   {% endif %}
 </div>
 
-{# ── 3. Klar til afhentning ──────────────────────────────── #}
+{# ── 3. Klar til afhentning — per KO ────────────────────── #}
 <div class="section-block">
   <div class="section-head">
     <h2>Klar til afhentning</h2>
-    <span class="section-count">{{ klar_afhentning | length }}</span>
+    <span class="section-count">{{ klar_kos | length }}</span>
   </div>
-  {% if klar_afhentning %}
+  {% if klar_kos %}
   <table class="data-table">
     <thead>
       <tr>
         <th>Kundeordre</th>
-        <th>Ordre-ID</th>
         <th>Kunde</th>
-        <th>Figur</th>
+        <th>Produkter</th>
         <th>Holdeplads</th>
         <th>Deadline</th>
         <th>Status</th>
@@ -176,56 +175,38 @@
       </tr>
     </thead>
     <tbody>
-      {% for o in klar_afhentning %}
+      {% for ko in klar_kos %}
+      {% set orders = klar_ko_orders[ko.customer_order_no] %}
       <tr>
         <td>
-          {% if o.customer_order_no %}
-            <a href="{{ url_for('kundeordre_detail', ko_no=o.customer_order_no) }}"
-               style="font-weight:600; color:var(--accent);">{{ o.customer_order_no }}</a>
-          {% else %}—{% endif %}
+          <a href="{{ url_for('kundeordre_detail', ko_no=ko.customer_order_no) }}"
+             style="font-weight:600; color:var(--accent);">{{ ko.customer_order_no }}</a>
         </td>
-        <td><a href="{{ url_for('ordre_detail', order_id=o.order_id) }}"
-               class="order-id" style="text-decoration:none;">{{ o.order_id }}</a></td>
-        <td>{{ o.customer }}</td>
-        <td>{{ o.figure_id }}</td>
+        <td>{{ ko.customer }}</td>
+        <td style="font-size:.82rem; color:var(--text-muted);">
+          {% for o in orders %}{{ o.figure_id }}{% if not loop.last %}, {% endif %}{% endfor %}
+        </td>
         <td>
-          {% if o.holdeplads %}<strong>{{ o.holdeplads }}</strong>
+          {% if ko.holdeplads %}<strong>{{ ko.holdeplads }}</strong>
           {% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
         </td>
         <td>
-          {% if o.expected_delivery_at %}
-            <span class="deadline-badge" data-deadline="{{ o.expected_delivery_at }}"
-                  style="font-size:.78rem;">{{ o.expected_delivery_at[:16] }}</span>
+          {% if ko.expected_delivery_at %}
+            <span class="deadline-badge" data-deadline="{{ ko.expected_delivery_at }}"
+                  style="font-size:.78rem;">{{ ko.expected_delivery_at[:16] }}</span>
           {% else %}—{% endif %}
         </td>
         <td>
-          {% if o.salg_pickup_requested %}
+          {% if ko.salg_pickup_requested %}
             <span class="pill pill-klar_til_afhentning">Venter på logistik</span>
           {% else %}
             <span class="pill pill-klar_til_afhentning">Klar til afhentning</span>
           {% endif %}
         </td>
         <td>
-          {% if not o.salg_pickup_requested %}
-          <form method="POST" action="{{ url_for('salg_registrer_afhentning', order_id=o.order_id) }}">
-            <div style="display:flex; flex-direction:column; gap:.5rem; align-items:flex-start;">
-              <div class="rating-group" style="display:flex; gap:.25rem;">
-                {% for n in range(1, 11) %}
-                <label style="cursor:pointer;">
-                  <input type="radio" name="customer_rating" value="{{ n }}"
-                         style="display:none;" class="rating-radio" data-order="{{ o.order_id }}">
-                  <span class="rating-btn" id="rb-{{ o.order_id }}-{{ n }}"
-                        style="display:inline-block; width:1.7rem; line-height:1.7rem;
-                               text-align:center; border-radius:.3rem; font-size:.78rem;
-                               font-weight:600; background:var(--surface-2,#2a2a2a);
-                               color:var(--text-muted); cursor:pointer; transition:background .15s;">
-                    {{ n }}
-                  </span>
-                </label>
-                {% endfor %}
-              </div>
-              <button type="submit" class="btn btn-primary btn-sm">Registrér afhentning</button>
-            </div>
+          {% if not ko.salg_pickup_requested %}
+          <form method="POST" action="{{ url_for('salg_registrer_afhentning', ko_no=ko.customer_order_no) }}">
+            <button type="submit" class="btn btn-primary btn-sm">Registrér afhentning</button>
           </form>
           {% else %}
             <span style="color:var(--text-muted);font-size:.82rem;font-style:italic;">Afventer logistik…</span>
@@ -240,47 +221,42 @@
   {% endif %}
 </div>
 
-{# ── 4. Afhentet — fakturer ──────────────────────────────── #}
+{# ── 4. Afhentet — fakturer per KO ───────────────────────── #}
 <div class="section-block">
   <div class="section-head">
     <h2>Afhentet — fakturer</h2>
-    <span class="section-count">{{ afhentet | length }}</span>
+    <span class="section-count">{{ afhentet_kos | length }}</span>
   </div>
-  {% if afhentet %}
-    {% for o in afhentet %}
+  {% if afhentet_kos %}
+    {% for ko in afhentet_kos %}
+    {% set orders = afhentet_ko_orders[ko.customer_order_no] %}
+    {% set total_selling = namespace(val=0) %}
+    {% for o in orders %}{% set total_selling.val = total_selling.val + (o.selling_price or 0) %}{% endfor %}
     <div style="padding:1.1rem 1.4rem; border-bottom:1px solid var(--border);">
       <div style="display:flex; align-items:center; gap:1.5rem; margin-bottom:.75rem; flex-wrap:wrap;">
-        {% if o.customer_order_no %}
-          <a href="{{ url_for('kundeordre_detail', ko_no=o.customer_order_no) }}"
-             style="font-weight:600; color:var(--accent); font-size:.9rem;">
-            {{ o.customer_order_no }}
-          </a>
-        {% endif %}
-        <a href="{{ url_for('ordre_detail', order_id=o.order_id) }}"
-           class="order-id" style="text-decoration:none;">{{ o.order_id }}</a>
-        <span>{{ o.customer }}</span>
-        <span style="color:var(--text-muted);">{{ o.figure_id }}</span>
-        {% if o.selling_price %}
+        <a href="{{ url_for('kundeordre_detail', ko_no=ko.customer_order_no) }}"
+           style="font-weight:700; color:var(--accent);">{{ ko.customer_order_no }}</a>
+        <span>{{ ko.customer }}</span>
+        <span style="color:var(--text-muted); font-size:.82rem;">
+          {{ orders | length }} produkt(er):
+          {% for o in orders %}{{ o.figure_id }}{% if not loop.last %}, {% endif %}{% endfor %}
+        </span>
+        {% if total_selling.val %}
           <span style="font-size:.82rem; font-weight:600;">
-            Salgspris: {{ "{:,.0f}".format(o.selling_price) }} kr
+            Samlet salgspris: {{ "{:,.0f}".format(total_selling.val) }} kr
           </span>
         {% endif %}
-        {% if o.actual_cost %}
-          <span style="color:var(--text-muted);font-size:.82rem;">
-            Komponentomk.: {{ "{:,.0f}".format(o.actual_cost) }} kr
-          </span>
-        {% endif %}
-        {% if o.expected_delivery_at %}
-          <span class="deadline-badge" data-deadline="{{ o.expected_delivery_at }}"
-                style="font-size:.78rem;">Deadline: {{ o.expected_delivery_at[:16] }}</span>
+        {% if ko.expected_delivery_at %}
+          <span class="deadline-badge" data-deadline="{{ ko.expected_delivery_at }}"
+                style="font-size:.78rem;">Deadline: {{ ko.expected_delivery_at[:16] }}</span>
         {% endif %}
       </div>
-      <form method="POST" action="{{ url_for('salg_opret_faktura', order_id=o.order_id) }}"
+      <form method="POST" action="{{ url_for('salg_opret_faktura', ko_no=ko.customer_order_no) }}"
             style="display:flex; gap:.75rem; align-items:flex-end; flex-wrap:wrap;">
         <div class="form-group" style="margin:0; min-width:180px;">
           <label>Fakturabeløb (kr)</label>
           <input type="number" name="amount" step="0.01" min="0"
-                 value="{{ o.selling_price or o.actual_cost or o.estimated_cost or '' }}" required />
+                 value="{{ total_selling.val or '' }}" required />
         </div>
         <button type="submit" class="btn btn-primary">Opret faktura</button>
       </form>

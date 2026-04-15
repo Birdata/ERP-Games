@@ -201,6 +201,40 @@ def _update_status(db, order_id: str, status: str, extra: dict | None = None):
     db.commit()
 
 
+def _update_ko_status(db, ko_no: str, status: str, extra: dict | None = None):
+    """Move ALL orders in a KO to the same status, and update the KO row if extra has KO fields."""
+    fields = {"status": status, "updated_at": _now()}
+    # Fields that live on the orders table
+    order_extra = {k: v for k, v in (extra or {}).items()
+                   if k in ("qc_result", "actual_cost", "produced_at", "holdeplads", "customer_rating")}
+    # Fields that live on the customer_orders table
+    ko_extra = {k: v for k, v in (extra or {}).items()
+                if k in ("holdeplads", "produced_at", "qc_result")}
+    if order_extra:
+        fields.update(order_extra)
+    set_clause = ", ".join(f"{k}=?" for k in fields)
+    db.execute(
+        f"UPDATE orders SET {set_clause} WHERE customer_order_no=?",
+        list(fields.values()) + [ko_no],
+    )
+    if ko_extra:
+        ko_set = ", ".join(f"{k}=?" for k in ko_extra)
+        db.execute(
+            f"UPDATE customer_orders SET {ko_set} WHERE customer_order_no=?",
+            list(ko_extra.values()) + [ko_no],
+        )
+    # Log event on each order in the KO
+    for row in db.execute("SELECT order_id FROM orders WHERE customer_order_no=?", (ko_no,)).fetchall():
+        _log_event(db, row["order_id"], status)
+    db.commit()
+
+
+def _ko_no_of(db, order_id: str) -> str | None:
+    """Return the customer_order_no for an order_id."""
+    row = db.execute("SELECT customer_order_no FROM orders WHERE order_id=?", (order_id,)).fetchone()
+    return row["customer_order_no"] if row and row["customer_order_no"] else None
+
+
 def _compare_sequences(detected: list[str], expected: list[str]) -> dict:
     errors = []
     for i in range(max(len(detected), len(expected))):
@@ -351,19 +385,39 @@ def salg():
         " LEFT JOIN customer_orders co ON co.customer_order_no = o.customer_order_no"
         " WHERE o.status='pending_kunde' ORDER BY o.created_at"
     ).fetchall()
-    klar_afhentning = db.execute(
-        "SELECT o.*, co.expected_delivery_at"
-        " FROM orders o"
-        " LEFT JOIN customer_orders co ON co.customer_order_no = o.customer_order_no"
-        " WHERE o.status='klar_til_afhentning' ORDER BY o.updated_at DESC"
+    # KOs with klar_til_afhentning — one row per KO
+    klar_kos = db.execute(
+        "SELECT co.* FROM customer_orders co"
+        " WHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_order_no=co.customer_order_no"
+        "               AND o.status='klar_til_afhentning')"
+        " ORDER BY co.created_at DESC"
     ).fetchall()
-    afhentet = db.execute(
-        "SELECT o.*, co.expected_delivery_at FROM orders o"
-        " LEFT JOIN invoices i ON o.order_id=i.order_id"
-        " LEFT JOIN customer_orders co ON co.customer_order_no = o.customer_order_no"
-        " WHERE o.status='afhentet' AND i.id IS NULL"
-        " ORDER BY o.updated_at DESC"
+    klar_ko_orders = {
+        ko["customer_order_no"]: db.execute(
+            "SELECT * FROM orders WHERE customer_order_no=? AND status='klar_til_afhentning'",
+            (ko["customer_order_no"],),
+        ).fetchall()
+        for ko in klar_kos
+    }
+
+    # KOs afhentet awaiting invoice — one row per KO
+    afhentet_kos = db.execute(
+        "SELECT co.* FROM customer_orders co"
+        " WHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_order_no=co.customer_order_no"
+        "               AND o.status='afhentet')"
+        "   AND NOT EXISTS (SELECT 1 FROM invoices i"
+        "                    JOIN orders o ON i.order_id=o.order_id"
+        "                   WHERE o.customer_order_no=co.customer_order_no)"
+        " ORDER BY co.created_at DESC"
     ).fetchall()
+    afhentet_ko_orders = {
+        ko["customer_order_no"]: db.execute(
+            "SELECT * FROM orders WHERE customer_order_no=? AND status='afhentet'",
+            (ko["customer_order_no"],),
+        ).fetchall()
+        for ko in afhentet_kos
+    }
+
     # Open KOs for adding more items
     open_kos = db.execute(
         "SELECT co.*, COUNT(o.id) as item_count"
@@ -377,8 +431,10 @@ def salg():
     perms = _db.get_permissions_map(db)
     return render_template("salg.html",
                            pending_kunde=pending_kunde,
-                           klar_afhentning=klar_afhentning,
-                           afhentet=afhentet,
+                           klar_kos=klar_kos,
+                           klar_ko_orders=klar_ko_orders,
+                           afhentet_kos=afhentet_kos,
+                           afhentet_ko_orders=afhentet_ko_orders,
                            open_kos=open_kos,
                            perms=perms,
                            now=_now())
@@ -508,40 +564,48 @@ def salg_tilfoej_produkt(ko_no):
 
 @app.post("/salg/godkend_kunde/<order_id>")
 def salg_godkend_kunde(order_id):
-    _update_status(get_db(), order_id, "indkoeb_afventer")
-    flash(f"{order_id} godkendt — sendt direkte til indkøb.", "info")
+    db = get_db()
+    ko_no = _ko_no_of(db, order_id)
+    if ko_no:
+        _update_ko_status(db, ko_no, "indkoeb_afventer")
+        flash(f"{ko_no} godkendt — sendt direkte til indkøb.", "info")
+    else:
+        _update_status(db, order_id, "indkoeb_afventer")
+        flash(f"{order_id} godkendt — sendt direkte til indkøb.", "info")
     return redirect(url_for("salg"))
 
 
 @app.post("/salg/afvis_kunde/<order_id>")
 def salg_afvis_kunde(order_id):
-    _update_status(get_db(), order_id, "afvist")
-    flash(f"{order_id} afvist.", "info")
+    db = get_db()
+    ko_no = _ko_no_of(db, order_id)
+    if ko_no:
+        _update_ko_status(db, ko_no, "afvist")
+        flash(f"{ko_no} afvist.", "info")
+    else:
+        _update_status(db, order_id, "afvist")
+        flash(f"{order_id} afvist.", "info")
     return redirect(url_for("salg"))
 
 
-@app.post("/salg/registrer_afhentning/<order_id>")
-def salg_registrer_afhentning(order_id):
+@app.post("/salg/registrer_afhentning/<ko_no>")
+def salg_registrer_afhentning(ko_no):
     db = get_db()
     db.execute(
-        "UPDATE orders SET salg_pickup_requested=1, updated_at=? WHERE order_id=?",
-        (_now(), order_id),
+        "UPDATE customer_orders SET salg_pickup_requested=1 WHERE customer_order_no=?", (ko_no,)
     )
     db.commit()
-    # Check if logistik already confirmed
-    row = db.execute(
-        "SELECT salg_delivery_confirmed FROM orders WHERE order_id=?", (order_id,)
-    ).fetchone()
-    if row and row["salg_delivery_confirmed"]:
-        _update_status(db, order_id, "afhentet")
-        flash(f"{order_id} afhentet — begge parter har bekræftet.", "info")
+    ko = db.execute("SELECT * FROM customer_orders WHERE customer_order_no=?", (ko_no,)).fetchone()
+    if ko and ko["salg_delivery_confirmed"]:
+        _update_ko_status(db, ko_no, "afhentet")
+        flash(f"{ko_no} afhentet — begge parter har bekræftet.", "info")
     else:
-        flash(f"{order_id}: Afhentet markeret — venter på logistiks bekræftelse.", "info")
+        flash(f"{ko_no}: Afhentet markeret — venter på logistiks bekræftelse.", "info")
     return redirect(url_for("salg"))
 
 
-@app.post("/salg/opret_faktura/<order_id>")
-def salg_opret_faktura(order_id):
+@app.post("/salg/opret_faktura/<ko_no>")
+def salg_opret_faktura(ko_no):
     db = get_db()
     amount = request.form.get("amount", "0").strip()
     try:
@@ -550,21 +614,23 @@ def salg_opret_faktura(order_id):
         flash("Ugyldigt beløb.", "error")
         return redirect(url_for("salg"))
 
-    row = db.execute(
-        "SELECT customer FROM orders WHERE order_id=?", (order_id,)
-    ).fetchone()
-    if not row:
-        flash("Ordre ikke fundet.", "error")
+    ko = db.execute("SELECT * FROM customer_orders WHERE customer_order_no=?", (ko_no,)).fetchone()
+    if not ko:
+        flash("Kundeordre ikke fundet.", "error")
         return redirect(url_for("salg"))
 
+    # One invoice for the whole KO
+    first = db.execute(
+        "SELECT order_id FROM orders WHERE customer_order_no=? LIMIT 1", (ko_no,)
+    ).fetchone()
     db.execute(
         "INSERT INTO invoices (order_id, customer, amount, invoice_date)"
         " VALUES (?, ?, ?, ?)",
-        (order_id, row["customer"], amount, date.today().isoformat()),
+        (first["order_id"] if first else ko_no, ko["customer"], amount, date.today().isoformat()),
     )
     db.commit()
-    _update_status(db, order_id, "faktureret")
-    flash(f"Faktura oprettet for {order_id}: {amount:,.2f} kr.", "info")
+    _update_ko_status(db, ko_no, "faktureret")
+    flash(f"Faktura oprettet for {ko_no}: {amount:,.2f} kr.", "info")
     return redirect(url_for("salg"))
 
 
@@ -654,50 +720,78 @@ def oekonomi_betal(payment_id):
 # LOGISTIK
 # ===========================================================================
 
+def _ko_list(db, status_filter: str, extra_where: str = "") -> list:
+    """Return distinct KOs that have at least one order in the given status."""
+    return db.execute(
+        f"SELECT co.* FROM customer_orders co"
+        f" WHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_order_no=co.customer_order_no"
+        f"               AND o.status=?{' AND ' + extra_where if extra_where else ''})"
+        f" ORDER BY co.created_at",
+        (status_filter,),
+    ).fetchall()
+
+
+def _ko_products(db, ko_no: str, status: str | None = None) -> list:
+    """Return all orders (line items) in a KO, optionally filtered by status."""
+    q = "SELECT * FROM orders WHERE customer_order_no=?"
+    params = [ko_no]
+    if status:
+        q += " AND status=?"
+        params.append(status)
+    return db.execute(q, params).fetchall()
+
+
 @app.get("/logistik")
 def logistik():
     db = get_db()
-    klodser_hentet = db.execute(
-        "SELECT * FROM orders WHERE status='klodser_hentet' ORDER BY updated_at"
-    ).fetchall()
-    pending_prod_confirm = db.execute(
-        "SELECT * FROM orders WHERE status='klar_til_produktion'"
-        " AND prod_pickup_requested=1 AND prod_delivery_confirmed=0 ORDER BY updated_at"
-    ).fetchall()
-    paa_lager = db.execute(
-        "SELECT * FROM orders WHERE status='paa_lager' ORDER BY updated_at DESC"
-    ).fetchall()
-    pending_salg_confirm = db.execute(
-        "SELECT * FROM orders WHERE status='klar_til_afhentning'"
-        " AND salg_pickup_requested=1 AND salg_delivery_confirmed=0 ORDER BY updated_at"
+
+    # KOs with klodser_hentet orders
+    klodser_kos = _ko_list(db, "klodser_hentet")
+    ko_orders = {ko["customer_order_no"]: _ko_products(db, ko["customer_order_no"], "klodser_hentet")
+                 for ko in klodser_kos}
+    components = {}
+    for orders in ko_orders.values():
+        for o in orders:
+            components[o["order_id"]] = db.execute(
+                "SELECT component, quantity, unit_price FROM component_prices WHERE figure_id=?",
+                (o["figure_id"],),
+            ).fetchall()
+
+    # KOs awaiting prod delivery confirmation
+    pending_prod_kos = db.execute(
+        "SELECT co.* FROM customer_orders co"
+        " WHERE co.prod_pickup_requested=1 AND co.prod_delivery_confirmed=0"
+        "   AND EXISTS (SELECT 1 FROM orders o WHERE o.customer_order_no=co.customer_order_no"
+        "               AND o.status='klar_til_produktion')"
+        " ORDER BY co.created_at"
     ).fetchall()
 
-    # Components per order for klodser_hentet display
-    components = {}
-    for o in klodser_hentet:
-        rows = db.execute(
-            "SELECT component, quantity, unit_price FROM component_prices WHERE figure_id=?",
-            (o["figure_id"],),
-        ).fetchall()
-        components[o["order_id"]] = rows
+    # KOs on lager
+    paa_lager_kos = _ko_list(db, "paa_lager")
+    lager_orders  = {ko["customer_order_no"]: _ko_products(db, ko["customer_order_no"], "paa_lager")
+                     for ko in paa_lager_kos}
+
+    # KOs awaiting salg delivery confirmation
+    pending_salg_kos = db.execute(
+        "SELECT co.* FROM customer_orders co"
+        " WHERE co.salg_pickup_requested=1 AND co.salg_delivery_confirmed=0"
+        "   AND EXISTS (SELECT 1 FROM orders o WHERE o.customer_order_no=co.customer_order_no"
+        "               AND o.status='klar_til_afhentning')"
+        " ORDER BY co.created_at"
+    ).fetchall()
 
     return render_template("logistik.html",
-                           klodser_hentet=klodser_hentet,
-                           pending_prod_confirm=pending_prod_confirm,
-                           paa_lager=paa_lager,
-                           pending_salg_confirm=pending_salg_confirm,
-                           components=components)
+                           klodser_kos=klodser_kos,
+                           ko_orders=ko_orders,
+                           components=components,
+                           pending_prod_kos=pending_prod_kos,
+                           paa_lager_kos=paa_lager_kos,
+                           lager_orders=lager_orders,
+                           pending_salg_kos=pending_salg_kos)
 
 
-@app.post("/logistik/send_indkoeb/<order_id>")
-def logistik_send_indkoeb(order_id):
-    _update_status(get_db(), order_id, "indkoeb_afventer")
-    flash(f"{order_id} sendt til indkøb.", "info")
-    return redirect(url_for("logistik"))
-
-
-@app.post("/logistik/send_payment_request/<order_id>")
-def logistik_send_payment_request(order_id):
+@app.post("/logistik/send_payment_request/<ko_no>")
+def logistik_send_payment_request(ko_no):
     db = get_db()
     supplier    = request.form.get("supplier", "").strip()
     amount      = request.form.get("amount", "0").strip()
@@ -709,99 +803,94 @@ def logistik_send_payment_request(order_id):
         flash("Ugyldigt beløb.", "error")
         return redirect(url_for("logistik"))
 
+    # One payment record for the whole KO
+    first = db.execute(
+        "SELECT order_id FROM orders WHERE customer_order_no=? LIMIT 1", (ko_no,)
+    ).fetchone()
     db.execute(
         "INSERT INTO payments (order_id, supplier, amount, invoice_ref)"
         " VALUES (?, ?, ?, ?)",
-        (order_id, supplier, amount, invoice_ref),
+        (first["order_id"] if first else ko_no, supplier, amount, invoice_ref),
     )
     db.execute(
-        "UPDATE orders SET payment_request_sent=1, updated_at=? WHERE order_id=?",
-        (_now(), order_id),
+        "UPDATE customer_orders SET payment_request_sent=1 WHERE customer_order_no=?", (ko_no,)
     )
     db.commit()
 
-    # Advance status if production was already notified
-    row = db.execute(
-        "SELECT production_notified FROM orders WHERE order_id=?", (order_id,)
-    ).fetchone()
-    if row and row["production_notified"]:
-        _update_status(db, order_id, "klar_til_produktion")
-
-    flash(f"Betalingsanmodning sendt for {order_id}.", "info")
-    return redirect(url_for("logistik"))
-
-
-@app.post("/logistik/notificer_prod/<order_id>")
-def logistik_notificer_prod(order_id):
-    db = get_db()
-    db.execute(
-        "UPDATE orders SET production_notified=1, updated_at=? WHERE order_id=?",
-        (_now(), order_id),
-    )
-    db.commit()
-
-    row = db.execute(
-        "SELECT payment_request_sent FROM orders WHERE order_id=?", (order_id,)
-    ).fetchone()
-    if row and row["payment_request_sent"]:
-        _update_status(db, order_id, "klar_til_produktion")
-        flash(f"{order_id} klar til produktion — begge opgaver fuldført.", "info")
+    ko = db.execute("SELECT * FROM customer_orders WHERE customer_order_no=?", (ko_no,)).fetchone()
+    if ko and ko["production_notified"]:
+        _update_ko_status(db, ko_no, "klar_til_produktion")
+        flash(f"{ko_no} klar til produktion — begge opgaver fuldført.", "info")
     else:
-        flash(f"{order_id}: Produktion notificeret — afventer betalingsanmodning.", "info")
+        flash(f"Betalingsanmodning sendt for {ko_no} — afventer produktion-notifikation.", "info")
     return redirect(url_for("logistik"))
 
 
-@app.post("/logistik/bekraeft_prod/<order_id>")
-def logistik_bekraeft_prod(order_id):
+@app.post("/logistik/notificer_prod/<ko_no>")
+def logistik_notificer_prod(ko_no):
     db = get_db()
     db.execute(
-        "UPDATE orders SET prod_delivery_confirmed=1, updated_at=? WHERE order_id=?",
-        (_now(), order_id),
+        "UPDATE customer_orders SET production_notified=1 WHERE customer_order_no=?", (ko_no,)
     )
     db.commit()
-    row = db.execute(
-        "SELECT prod_pickup_requested FROM orders WHERE order_id=?", (order_id,)
-    ).fetchone()
-    if row and row["prod_pickup_requested"]:
-        _update_status(db, order_id, "i_produktion")
-        flash(f"{order_id} er nu i produktion — begge parter har bekræftet.", "info")
+
+    ko = db.execute("SELECT * FROM customer_orders WHERE customer_order_no=?", (ko_no,)).fetchone()
+    if ko and ko["payment_request_sent"]:
+        _update_ko_status(db, ko_no, "klar_til_produktion")
+        flash(f"{ko_no} klar til produktion — begge opgaver fuldført.", "info")
     else:
-        flash(f"{order_id}: Aflevering bekræftet — venter på produktion.", "info")
+        flash(f"{ko_no}: Produktion notificeret — afventer betalingsanmodning.", "info")
     return redirect(url_for("logistik"))
 
 
-@app.post("/logistik/bekraeft_salg/<order_id>")
-def logistik_bekraeft_salg(order_id):
+@app.post("/logistik/bekraeft_prod/<ko_no>")
+def logistik_bekraeft_prod(ko_no):
     db = get_db()
     db.execute(
-        "UPDATE orders SET salg_delivery_confirmed=1, updated_at=? WHERE order_id=?",
-        (_now(), order_id),
+        "UPDATE customer_orders SET prod_delivery_confirmed=1 WHERE customer_order_no=?", (ko_no,)
     )
     db.commit()
-    row = db.execute(
-        "SELECT salg_pickup_requested FROM orders WHERE order_id=?", (order_id,)
-    ).fetchone()
-    if row and row["salg_pickup_requested"]:
-        _update_status(db, order_id, "afhentet")
-        flash(f"{order_id} afhentet — begge parter har bekræftet.", "info")
+    ko = db.execute("SELECT * FROM customer_orders WHERE customer_order_no=?", (ko_no,)).fetchone()
+    if ko and ko["prod_pickup_requested"]:
+        _update_ko_status(db, ko_no, "i_produktion")
+        flash(f"{ko_no} er nu i produktion — begge parter har bekræftet.", "info")
     else:
-        flash(f"{order_id}: Bekræftelse registreret — venter på salg.", "info")
+        flash(f"{ko_no}: Aflevering bekræftet — venter på produktion.", "info")
     return redirect(url_for("logistik"))
 
 
-@app.post("/logistik/notificer_salg/<order_id>")
-def logistik_notificer_salg(order_id):
+@app.post("/logistik/bekraeft_salg/<ko_no>")
+def logistik_bekraeft_salg(ko_no):
     db = get_db()
-    # Allow editing holdeplads
+    db.execute(
+        "UPDATE customer_orders SET salg_delivery_confirmed=1 WHERE customer_order_no=?", (ko_no,)
+    )
+    db.commit()
+    ko = db.execute("SELECT * FROM customer_orders WHERE customer_order_no=?", (ko_no,)).fetchone()
+    if ko and ko["salg_pickup_requested"]:
+        _update_ko_status(db, ko_no, "afhentet")
+        flash(f"{ko_no} afhentet — begge parter har bekræftet.", "info")
+    else:
+        flash(f"{ko_no}: Bekræftelse registreret — venter på salg.", "info")
+    return redirect(url_for("logistik"))
+
+
+@app.post("/logistik/notificer_salg/<ko_no>")
+def logistik_notificer_salg(ko_no):
+    db = get_db()
     holdeplads = request.form.get("holdeplads", "").strip() or None
     if holdeplads:
         db.execute(
-            "UPDATE orders SET holdeplads=?, updated_at=? WHERE order_id=?",
-            (holdeplads, _now(), order_id),
+            "UPDATE customer_orders SET holdeplads=? WHERE customer_order_no=?",
+            (holdeplads, ko_no),
+        )
+        db.execute(
+            "UPDATE orders SET holdeplads=?, updated_at=? WHERE customer_order_no=?",
+            (holdeplads, _now(), ko_no),
         )
         db.commit()
-    _update_status(db, order_id, "klar_til_afhentning")
-    flash(f"{order_id} notificeret til salg — klar til afhentning.", "info")
+    _update_ko_status(db, ko_no, "klar_til_afhentning")
+    flash(f"{ko_no} notificeret til salg — klar til afhentning.", "info")
     return redirect(url_for("logistik"))
 
 
@@ -812,28 +901,42 @@ def logistik_notificer_salg(order_id):
 @app.get("/indkoeb")
 def indkoeb():
     db = get_db()
-    orders = db.execute(
-        "SELECT * FROM orders WHERE status='indkoeb_afventer' ORDER BY updated_at"
+    # One row per KO that has any order in indkoeb_afventer
+    kos = db.execute(
+        "SELECT co.* FROM customer_orders co"
+        " WHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_order_no=co.customer_order_no"
+        "               AND o.status='indkoeb_afventer')"
+        " ORDER BY co.created_at"
     ).fetchall()
+    # All orders per KO + their components
+    ko_orders = {}
     components = {}
-    for o in orders:
-        rows = db.execute(
-            "SELECT component, quantity, unit_price FROM component_prices WHERE figure_id=?",
-            (o["figure_id"],),
+    for ko in kos:
+        orders = db.execute(
+            "SELECT * FROM orders WHERE customer_order_no=? AND status='indkoeb_afventer'",
+            (ko["customer_order_no"],),
         ).fetchall()
-        components[o["order_id"]] = rows
-    return render_template("indkoeb.html", orders=orders, components=components)
+        ko_orders[ko["customer_order_no"]] = orders
+        for o in orders:
+            components[o["order_id"]] = db.execute(
+                "SELECT component, quantity, unit_price FROM component_prices WHERE figure_id=?",
+                (o["figure_id"],),
+            ).fetchall()
+    return render_template("indkoeb.html", kos=kos, ko_orders=ko_orders, components=components)
 
 
-@app.post("/indkoeb/bekraeft/<order_id>")
-def indkoeb_bekraeft(order_id):
+@app.post("/indkoeb/bekraeft/<ko_no>")
+def indkoeb_bekraeft(ko_no):
     db = get_db()
-    # Check if actual cost matches estimate
-    actual = _db.figure_cost(db, db.execute(
-        "SELECT figure_id FROM orders WHERE order_id=?", (order_id,)
-    ).fetchone()["figure_id"])
-    _update_status(db, order_id, "klodser_hentet", {"actual_cost": actual})
-    flash(f"{order_id} klodser hentet — sendt til logistik.", "info")
+    orders = db.execute(
+        "SELECT * FROM orders WHERE customer_order_no=? AND status='indkoeb_afventer'", (ko_no,)
+    ).fetchall()
+    for o in orders:
+        actual = _db.figure_cost(db, o["figure_id"])
+        db.execute("UPDATE orders SET actual_cost=? WHERE order_id=?", (actual, o["order_id"]))
+    db.commit()
+    _update_ko_status(db, ko_no, "klodser_hentet")
+    flash(f"Kundeordre {ko_no} — klodser hentet, sendt til logistik.", "info")
     return redirect(url_for("indkoeb"))
 
 
@@ -873,30 +976,32 @@ def produktion():
                            now=_now())
 
 
-@app.post("/produktion/hent/<order_id>")
-def produktion_hent(order_id):
+@app.post("/produktion/hent/<ko_no>")
+def produktion_hent(ko_no):
     db = get_db()
     db.execute(
-        "UPDATE orders SET prod_pickup_requested=1, updated_at=? WHERE order_id=?",
-        (_now(), order_id),
+        "UPDATE customer_orders SET prod_pickup_requested=1 WHERE customer_order_no=?", (ko_no,)
     )
     db.commit()
-    row = db.execute(
-        "SELECT prod_delivery_confirmed FROM orders WHERE order_id=?", (order_id,)
-    ).fetchone()
-    if row and row["prod_delivery_confirmed"]:
-        _update_status(db, order_id, "i_produktion")
-        flash(f"{order_id} er nu i produktion.", "info")
+    ko = db.execute("SELECT * FROM customer_orders WHERE customer_order_no=?", (ko_no,)).fetchone()
+    if ko and ko["prod_delivery_confirmed"]:
+        _update_ko_status(db, ko_no, "i_produktion")
+        flash(f"{ko_no} er nu i produktion.", "info")
     else:
-        flash(f"{order_id}: Hentning registreret — venter på logistiks bekræftelse.", "info")
+        flash(f"{ko_no}: Hentning registreret — venter på logistiks bekræftelse.", "info")
     return redirect(url_for("produktion"))
 
 
-@app.post("/produktion/faerdig/<order_id>")
-def produktion_faerdig(order_id):
-    _update_status(get_db(), order_id, "klar_til_qc",
-                   {"produced_at": _now()})
-    flash(f"{order_id} klar til QC-inspektion.", "info")
+@app.post("/produktion/faerdig/<ko_no>")
+def produktion_faerdig(ko_no):
+    db = get_db()
+    now = _now()
+    db.execute(
+        "UPDATE customer_orders SET produced_at=? WHERE customer_order_no=?", (now, ko_no)
+    )
+    db.commit()
+    _update_ko_status(db, ko_no, "klar_til_qc", {"produced_at": now})
+    flash(f"{ko_no} klar til QC-inspektion.", "info")
     return redirect(url_for("produktion"))
 
 
@@ -1022,12 +1127,38 @@ def qc_submit_manual(order_id):
     return redirect(url_for("qc"))
 
 
+def _all_qc_passed(db, ko_no: str) -> bool:
+    """True if every order in the KO has qc_result='pass'."""
+    total = db.execute(
+        "SELECT COUNT(*) FROM orders WHERE customer_order_no=?", (ko_no,)
+    ).fetchone()[0]
+    passed = db.execute(
+        "SELECT COUNT(*) FROM orders WHERE customer_order_no=? AND qc_result='pass'", (ko_no,)
+    ).fetchone()[0]
+    return total > 0 and total == passed
+
+
 @app.post("/qc/godkend/<order_id>")
 def qc_godkend(order_id):
     db = get_db()
-    holdeplads = _db.assign_holdeplads(db)
-    _update_status(db, order_id, "paa_lager", {"holdeplads": holdeplads})
-    flash(f"{order_id} godkendt — placeret på lager {holdeplads}.", "info")
+    # Mark this product as passed
+    db.execute("UPDATE orders SET qc_result='pass', updated_at=? WHERE order_id=?",
+               (_now(), order_id))
+    db.commit()
+    ko_no = _ko_no_of(db, order_id)
+    if ko_no and _all_qc_passed(db, ko_no):
+        holdeplads = _db.assign_holdeplads(db)
+        _update_ko_status(db, ko_no, "paa_lager", {"holdeplads": holdeplads})
+        db.execute("UPDATE customer_orders SET holdeplads=?, qc_result='pass' WHERE customer_order_no=?",
+                   (holdeplads, ko_no))
+        db.commit()
+        flash(f"{ko_no} — alle produkter godkendt, placeret på lager {holdeplads}.", "info")
+    else:
+        remaining = db.execute(
+            "SELECT COUNT(*) FROM orders WHERE customer_order_no=? AND (qc_result IS NULL OR qc_result!='pass')",
+            (ko_no,)
+        ).fetchone()[0] if ko_no else 0
+        flash(f"{order_id} godkendt — {remaining} produkt(er) afventer stadig QC.", "info")
     return redirect(url_for("qc"))
 
 
@@ -1035,19 +1166,32 @@ def qc_godkend(order_id):
 def qc_godkend_manuel(order_id):
     """Manual override — approve despite failed or missing CV inspection."""
     db = get_db()
-    holdeplads = _db.assign_holdeplads(db)
-    _update_status(db, order_id, "paa_lager",
-                   {"holdeplads": holdeplads, "qc_result": "pass"})
-    flash(f"{order_id} manuelt godkendt — placeret på lager {holdeplads}.", "info")
+    db.execute("UPDATE orders SET qc_result='pass', updated_at=? WHERE order_id=?",
+               (_now(), order_id))
+    db.commit()
+    ko_no = _ko_no_of(db, order_id)
+    if ko_no and _all_qc_passed(db, ko_no):
+        holdeplads = _db.assign_holdeplads(db)
+        _update_ko_status(db, ko_no, "paa_lager", {"holdeplads": holdeplads})
+        db.execute("UPDATE customer_orders SET holdeplads=?, qc_result='pass' WHERE customer_order_no=?",
+                   (holdeplads, ko_no))
+        db.commit()
+        flash(f"{ko_no} — alle produkter manuelt godkendt, placeret på lager {holdeplads}.", "info")
+    else:
+        flash(f"{order_id} manuelt godkendt — øvrige produkter afventer QC.", "info")
     return redirect(url_for("qc"))
 
 
 @app.post("/qc/afvis/<order_id>")
 def qc_afvis(order_id):
-    # Product is already with Produktion — send straight back to i_produktion,
-    # no need to re-fetch from Logistik.
-    _update_status(get_db(), order_id, "i_produktion")
-    flash(f"{order_id} fejlede QC — returneret til produktion til rettelse.", "info")
+    db = get_db()
+    ko_no = _ko_no_of(db, order_id)
+    if ko_no:
+        _update_ko_status(db, ko_no, "i_produktion")
+        flash(f"{ko_no} fejlede QC — hele kundeordren returneret til produktion.", "info")
+    else:
+        _update_status(db, order_id, "i_produktion")
+        flash(f"{order_id} fejlede QC — returneret til produktion.", "info")
     return redirect(url_for("qc"))
 
 
