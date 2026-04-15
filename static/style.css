@@ -293,7 +293,9 @@ p { color: var(--text-muted); margin-bottom: 1rem; }
 .kpi-card.kpi-produced { border-top-color: var(--pending); }
 .kpi-card.kpi-revenue  { border-top-color: var(--info); }
 .kpi-card.kpi-rating   { border-top-color: #9b59b6; }
-.kpi-card.kpi-penalty  { border-top-color: #c0392b; }
+.kpi-card.kpi-penalty       { border-top-color: #c0392b; }
+.kpi-card.kpi-profit        { border-top-color: #27ae60; }
+.kpi-card.kpi-profit-total  { border-top-color: #1a7a44; }
 
 .kpi-label {
   font-size: .72rem;

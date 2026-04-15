@@ -9,7 +9,26 @@ DATABASE = os.path.join(os.path.dirname(__file__), "erp.db")
 
 CREDIT_LIMIT = 200_000.0
 
-AUTO_APPROVE_CUSTOMERS = {"Navy Seal", "Bundeswehr", "Royal Navy", "Flyvevåbnet"}
+# Canonical customer list — single source of truth for seed data
+# (customer_no, name, discount_pct, auto_approve)
+_CUSTOMER_SEED: list[tuple[str, str, float, int]] = [
+    ("32127188-4", "Navy Seal",   0.20, 1),
+    ("33127198-4", "Bundeswehr",  0.20, 1),
+    ("87232099-1", "Royal Navy",  0.10, 0),
+    ("87233099-1", "Flyvevåbnet", 0.05, 0),
+]
+
+# Figure permissions per customer (from approved product matrix)
+_PERMISSION_SEED: dict[str, dict[str, int]] = {
+    "32127188-4": {"A1234H15": 1, "B1375A23": 1, "B2378F81": 0, "B8555G23": 1, "B1375A22": 1},
+    "33127198-4": {"A1234H15": 1, "B1375A23": 1, "B2378F81": 0, "B8555G23": 0, "B1375A22": 0},
+    "87232099-1": {"A1234H15": 1, "B1375A23": 1, "B2378F81": 1, "B8555G23": 1, "B1375A22": 1},
+    "87233099-1": {"A1234H15": 1, "B1375A23": 0, "B2378F81": 0, "B8555G23": 0, "B1375A22": 1},
+}
+
+# Derived constants (kept for backward compatibility)
+AUTO_APPROVE_CUSTOMERS: set[str] = {name for _, name, _, auto in _CUSTOMER_SEED if auto}
+CUSTOMER_DISCOUNTS: dict[str, float] = {name: disc for _, name, disc, _ in _CUSTOMER_SEED}
 
 # Component catalogue: colour → (varenummer, unit_price)
 COMPONENTS: dict[str, tuple[str, float]] = {
@@ -29,14 +48,6 @@ FIGURE_LIST_PRICES: dict[str, float] = {
     "B1375A23": 45_000.0,
     "A1234H15": 57_000.0,
     "B1375A22": 61_000.0,
-}
-
-# Discount rates per customer (0.20 = 20 %)
-CUSTOMER_DISCOUNTS: dict[str, float] = {
-    "Navy Seal":   0.20,
-    "Bundeswehr":  0.20,
-    "Royal Navy":  0.10,
-    "Flyvevåbnet": 0.05,
 }
 
 # Component seed: one row per unique component per figure
@@ -160,6 +171,22 @@ CREATE TABLE IF NOT EXISTS order_events (
     note        TEXT,
     timestamp   DATETIME NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS customers (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_no  TEXT UNIQUE NOT NULL,
+    name         TEXT NOT NULL,
+    discount_pct REAL DEFAULT 0.0,
+    auto_approve INTEGER DEFAULT 0,
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS customer_permissions (
+    customer_no  TEXT NOT NULL,
+    figure_id    TEXT NOT NULL,
+    approved     INTEGER DEFAULT 1,
+    PRIMARY KEY (customer_no, figure_id)
+);
 """
 
 
@@ -202,6 +229,20 @@ def init_db(conn: sqlite3.Connection) -> None:
                 " VALUES (?, ?, ?, ?)",
                 [(fig_id, comp, qty, price) for comp, qty, price in rows],
             )
+    # Seed customers + permissions if table is empty
+    if conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0] == 0:
+        conn.executemany(
+            "INSERT OR IGNORE INTO customers (customer_no, name, discount_pct, auto_approve)"
+            " VALUES (?, ?, ?, ?)",
+            _CUSTOMER_SEED,
+        )
+        for customer_no, perms in _PERMISSION_SEED.items():
+            conn.executemany(
+                "INSERT OR IGNORE INTO customer_permissions (customer_no, figure_id, approved)"
+                " VALUES (?, ?, ?)",
+                [(customer_no, fig, approved) for fig, approved in perms.items()],
+            )
+
     conn.commit()
 
 
@@ -277,3 +318,29 @@ def assign_holdeplads(conn: sqlite3.Connection) -> str:
             if slot not in used:
                 return slot
     return "X1"
+
+
+def get_customers(conn: sqlite3.Connection) -> list:
+    return conn.execute("SELECT * FROM customers ORDER BY name").fetchall()
+
+
+def get_customer_by_name(conn: sqlite3.Connection, name: str):
+    return conn.execute("SELECT * FROM customers WHERE name=?", (name,)).fetchone()
+
+
+def is_figure_allowed(conn: sqlite3.Connection, customer_no: str, figure_id: str) -> bool:
+    """Return True if the customer is permitted to order this figure.
+    If no permission row exists, default to allowed (backward compat)."""
+    row = conn.execute(
+        "SELECT approved FROM customer_permissions WHERE customer_no=? AND figure_id=?",
+        (customer_no, figure_id),
+    ).fetchone()
+    return row is None or bool(row["approved"])
+
+
+def get_permissions_map(conn: sqlite3.Connection) -> dict[str, dict[str, bool]]:
+    """Return {customer_no: {figure_id: approved}} for all customers."""
+    result: dict[str, dict[str, bool]] = {}
+    for row in conn.execute("SELECT customer_no, figure_id, approved FROM customer_permissions"):
+        result.setdefault(row["customer_no"], {})[row["figure_id"]] = bool(row["approved"])
+    return result

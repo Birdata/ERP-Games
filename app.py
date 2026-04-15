@@ -131,6 +131,10 @@ def inject_globals():
         "SELECT COUNT(*) FROM orders WHERE status='klar_til_qc'"
     ).fetchone()[0]
 
+    customers = get_db().execute(
+        "SELECT customer_no, name FROM customers ORDER BY name"
+    ).fetchall()
+
     return {
         "badges": {
             "salg": salg_badge,
@@ -142,6 +146,7 @@ def inject_globals():
         },
         "status_labels": _db.STATUS_LABELS,
         "figures": list(REFERENCE_SEQUENCES.keys()),
+        "all_customers": customers,
     }
 
 
@@ -266,6 +271,18 @@ def api_kpis():
         "SELECT COALESCE(SUM(amount),0) FROM invoices WHERE invoice_date=?",
         (today,),
     ).fetchone()[0]
+    todays_supplier_costs = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM payments"
+        " WHERE DATE(created_at) = ?",
+        (today,),
+    ).fetchone()[0]
+    todays_profit = round(todays_revenue - todays_supplier_costs, 0)
+    total_revenue = db.execute(
+        "SELECT COALESCE(SUM(amount),0) FROM invoices"
+    ).fetchone()[0]
+    total_supplier_costs = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM payments"
+    ).fetchone()[0]
     rating_row = db.execute(
         "SELECT ROUND(AVG(customer_rating),1), COUNT(customer_rating)"
         " FROM orders WHERE customer_rating IS NOT NULL"
@@ -303,6 +320,8 @@ def api_kpis():
             "penalty":   penalty,
         })
 
+    total_profit = round(total_revenue - total_supplier_costs - total_penalty, 0)
+
     return jsonify({
         "active_orders":    active,
         "pending_approval": pending,
@@ -314,6 +333,8 @@ def api_kpis():
         "total_penalty":    total_penalty,
         "overdue_count":    len(overdue_list),
         "overdue":          overdue_list,
+        "todays_profit":    todays_profit,
+        "total_profit":     total_profit,
     })
 
 
@@ -353,19 +374,25 @@ def salg():
         " ORDER BY co.created_at DESC LIMIT 20",
         (_now(),),
     ).fetchall()
+    perms = _db.get_permissions_map(db)
     return render_template("salg.html",
                            pending_kunde=pending_kunde,
                            klar_afhentning=klar_afhentning,
                            afhentet=afhentet,
                            open_kos=open_kos,
+                           perms=perms,
                            now=_now())
 
 
 def _create_order_line(db, customer_order_no: str, customer: str, figure_id: str) -> str:
     """Create one order line item under a KO. Returns order_id."""
-    order_id      = _db.next_order_id(db)
-    cost          = _db.figure_cost(db, figure_id)
-    selling_price = _db.figure_selling_price(figure_id, customer)
+    order_id  = _db.next_order_id(db)
+    cost      = _db.figure_cost(db, figure_id)
+    # Use discount from customers table if available, else fall back to hardcoded
+    c_row     = _db.get_customer_by_name(db, customer)
+    discount  = c_row["discount_pct"] if c_row else _db.CUSTOMER_DISCOUNTS.get(customer, 0.0)
+    list_price    = _db.FIGURE_LIST_PRICES.get(figure_id, 0.0)
+    selling_price = round(list_price * (1.0 - discount), 2)
 
     db.execute(
         "INSERT INTO orders"
@@ -383,7 +410,9 @@ def _create_order_line(db, customer_order_no: str, customer: str, figure_id: str
     _update_status(db, order_id, new_status)
 
     if new_status == "kapital_ok":
-        if customer in _db.AUTO_APPROVE_CUSTOMERS:
+        c_row   = _db.get_customer_by_name(db, customer)
+        is_auto = bool(c_row["auto_approve"]) if c_row else customer in _db.AUTO_APPROVE_CUSTOMERS
+        if is_auto:
             _update_status(db, order_id, "indkoeb_afventer")
         else:
             _update_status(db, order_id, "pending_kunde")
@@ -404,6 +433,14 @@ def salg_ny_kundeordre():
     if not customer or not figure_ids:
         flash("Udfyld kundenavn og mindst én figur.", "error")
         return redirect(url_for("salg"))
+
+    # Permission check
+    c_row = _db.get_customer_by_name(db, customer)
+    if c_row:
+        blocked = [f for f in figure_ids if not _db.is_figure_allowed(db, c_row["customer_no"], f)]
+        if blocked:
+            flash(f"Kunden har ikke rettighed til: {', '.join(blocked)}.", "error")
+            return redirect(url_for("salg"))
 
     # Expected delivery datetime
     expected_at = None
@@ -452,6 +489,11 @@ def salg_tilfoej_produkt(ko_no):
     ).fetchone()
     if not ko or figure_id not in REFERENCE_SEQUENCES:
         flash("Ugyldig kundeordre eller figur.", "error")
+        return redirect(url_for("salg"))
+
+    c_row = _db.get_customer_by_name(db, ko["customer"])
+    if c_row and not _db.is_figure_allowed(db, c_row["customer_no"], figure_id):
+        flash(f"Kunden har ikke rettighed til {figure_id}.", "error")
         return redirect(url_for("salg"))
 
     try:
@@ -1083,6 +1125,77 @@ def kundetilfredshed_registrer(order_id):
     db.commit()
     flash(f"Rating {rating}/5 registreret for {order_id}.", "info")
     return redirect(url_for("kundetilfredshed"))
+
+
+# ===========================================================================
+# KUNDER
+# ===========================================================================
+
+@app.get("/kunder")
+def kunder():
+    db = get_db()
+    customers = _db.get_customers(db)
+    all_figures = list(REFERENCE_SEQUENCES.keys())
+    perms = _db.get_permissions_map(db)
+    return render_template("kunder.html",
+                           customers=customers,
+                           all_figures=all_figures,
+                           perms=perms)
+
+
+@app.post("/kunder/opret")
+def kunder_opret():
+    db = get_db()
+    customer_no  = request.form.get("customer_no", "").strip()
+    name         = request.form.get("name", "").strip()
+    discount_pct = request.form.get("discount_pct", "0").strip()
+    auto_approve = 1 if request.form.get("auto_approve") else 0
+
+    if not customer_no or not name:
+        flash("Kundenr og navn er påkrævet.", "error")
+        return redirect(url_for("kunder"))
+    try:
+        discount = float(discount_pct) / 100.0
+    except ValueError:
+        discount = 0.0
+
+    db.execute(
+        "INSERT OR IGNORE INTO customers (customer_no, name, discount_pct, auto_approve)"
+        " VALUES (?, ?, ?, ?)",
+        (customer_no, name, discount, auto_approve),
+    )
+    for fig in REFERENCE_SEQUENCES.keys():
+        db.execute(
+            "INSERT OR IGNORE INTO customer_permissions (customer_no, figure_id, approved)"
+            " VALUES (?, ?, 1)",
+            (customer_no, fig),
+        )
+    db.commit()
+    flash(f"Kunde '{name}' ({customer_no}) oprettet.", "info")
+    return redirect(url_for("kunder"))
+
+
+@app.post("/kunder/<customer_no>/rettigheder")
+def kunder_rettigheder(customer_no):
+    db = get_db()
+    try:
+        discount = float(request.form.get("discount_pct", 0)) / 100.0
+    except ValueError:
+        discount = 0.0
+    db.execute(
+        "UPDATE customers SET discount_pct=? WHERE customer_no=?",
+        (discount, customer_no),
+    )
+    for fig in REFERENCE_SEQUENCES.keys():
+        approved = 1 if request.form.get(f"fig_{fig}") else 0
+        db.execute(
+            "INSERT OR REPLACE INTO customer_permissions (customer_no, figure_id, approved)"
+            " VALUES (?, ?, ?)",
+            (customer_no, fig, approved),
+        )
+    db.commit()
+    flash("Rettigheder og rabat opdateret.", "info")
+    return redirect(url_for("kunder"))
 
 
 # ===========================================================================

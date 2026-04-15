@@ -52,6 +52,18 @@
     <div class="kpi-sub" id="kpi-penalty-sub">1 % / min pr. forsinket KO</div>
   </div>
 
+  <div class="kpi-card kpi-profit">
+    <div class="kpi-label">Dagens overskud</div>
+    <div class="kpi-value" id="kpi-profit-today">—</div>
+    <div class="kpi-sub" id="kpi-profit-today-sub">Omsætning − vareomkostninger</div>
+  </div>
+
+  <div class="kpi-card kpi-profit-total">
+    <div class="kpi-label">Samlet overskud</div>
+    <div class="kpi-value" id="kpi-profit-total">—</div>
+    <div class="kpi-sub">Akkumuleret siden start</div>
+  </div>
+
 </div>
 
 {# ── Orders Table ───────────────────────────────────────────── #}
@@ -188,6 +200,17 @@
           penaltyEl.style.color    = '#27ae60';
           penaltySubEl.textContent = 'Ingen forsinkelser';
         }
+
+        // Profit
+        var profitTodayEl    = document.getElementById('kpi-profit-today');
+        var profitTodaySubEl = document.getElementById('kpi-profit-today-sub');
+        profitTodayEl.textContent    = fmtKr(d.todays_profit);
+        profitTodayEl.style.color    = d.todays_profit > 0 ? '#27ae60' : d.todays_profit < 0 ? '#c0392b' : '';
+        profitTodaySubEl.textContent = d.todays_profit >= 0 ? 'Positivt resultat i dag' : 'Negativt resultat i dag';
+
+        var profitTotalEl = document.getElementById('kpi-profit-total');
+        profitTotalEl.textContent = fmtKr(d.total_profit);
+        profitTotalEl.style.color = d.total_profit > 0 ? '#27ae60' : d.total_profit < 0 ? '#c0392b' : '';
       })
       .catch(() => {});
   }
