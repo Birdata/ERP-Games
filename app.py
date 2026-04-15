@@ -377,8 +377,8 @@ def _create_order_line(db, customer_order_no: str, customer: str, figure_id: str
                f"Oprettet under {customer_order_no} for {customer}")
     db.commit()
 
-    # Auto økonomi check
-    available = _db.available_credit(db)
+    # Auto økonomi check — brug kassekredit + overskudslikviditet
+    available = _db.total_available(db)
     new_status = "kapital_ok" if available >= cost else "pending_kapital"
     _update_status(db, order_id, new_status)
 
@@ -551,8 +551,10 @@ def oekonomi():
     total_sum = db.execute(
         "SELECT COALESCE(SUM(amount),0) FROM invoices"
     ).fetchone()[0]
-    credit_used  = _db.active_orders_cost(db)
-    credit_avail = _db.available_credit(db)
+    credit_used    = _db.active_orders_cost(db)
+    credit_avail   = _db.available_credit(db)
+    profit         = _db.profit_liquidity(db)
+    total_avail    = _db.total_available(db)
     return render_template("oekonomi.html",
                            pending_kapital=pending_kapital,
                            payments=payments,
@@ -561,7 +563,9 @@ def oekonomi():
                            total_sum=total_sum,
                            credit_used=credit_used,
                            credit_avail=credit_avail,
-                           credit_limit=_db.CREDIT_LIMIT)
+                           credit_limit=_db.CREDIT_LIMIT,
+                           profit=profit,
+                           total_avail=total_avail)
 
 
 @app.post("/oekonomi/godkend_kapital/<order_id>")

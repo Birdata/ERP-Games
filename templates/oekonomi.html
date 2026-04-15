@@ -30,6 +30,39 @@
   </div>
 </div>
 
+{# ── Overskudslikviditet ──────────────────────────────────── #}
+{% set profit_pct = [(profit / (profit + 1) * 100) | round | int, 100] | min if profit > 0 else 0 %}
+{% set total_pct  = [((total_avail) / (credit_limit + profit + 1) * 100) | round | int, 100] | min %}
+<div class="credit-meter" style="margin-top:.75rem;">
+  <div class="credit-meter-labels">
+    <span><strong>Overskudslikviditet</strong>
+      <span style="color:var(--text-muted); font-size:.8rem; font-weight:400; margin-left:.5rem;">
+        (omsætning − betalte leverandøromk.)
+      </span>
+    </span>
+    <span>
+      <span style="color:{% if profit > 0 %}var(--success){% else %}var(--text-muted){% endif %}; font-weight:700;">
+        {{ "{:,.0f}".format(profit) }} kr til rådighed
+      </span>
+    </span>
+  </div>
+  <div class="credit-meter-bar-bg">
+    <div class="credit-meter-bar-fill"
+         style="width:{% if profit > 0 %}100{% else %}0{% endif %}%;
+                background:{% if profit > 0 %}var(--success){% else %}#444{% endif %};
+                opacity:{% if profit > 0 %}0.85{% else %}0.3{% endif %};"></div>
+  </div>
+</div>
+
+{# ── Samlet rådighedsbeløb ────────────────────────────────── #}
+<div style="display:flex; align-items:center; justify-content:flex-end; gap:.5rem;
+            margin-top:.5rem; margin-bottom:1.25rem; font-size:.88rem; color:var(--text-muted);">
+  Samlet rådighedsbeløb (kassekredit + overskud):
+  <strong style="font-size:1rem; color:{% if total_avail > 50000 %}var(--success){% elif total_avail > 10000 %}var(--warning){% else %}var(--danger){% endif %};">
+    {{ "{:,.0f}".format(total_avail) }} kr
+  </strong>
+</div>
+
 {# ── 1. Afventer kapital-godkendelse ─────────────────────── #}
 <div class="section-block">
   <div class="section-head">

@@ -237,6 +237,22 @@ def available_credit(conn: sqlite3.Connection) -> float:
     return CREDIT_LIMIT - active_orders_cost(conn)
 
 
+def profit_liquidity(conn: sqlite3.Connection) -> float:
+    """Overskudslikviditet = faktureret omsætning − betalte leverandøromkostninger."""
+    revenue = conn.execute(
+        "SELECT COALESCE(SUM(amount),0) FROM invoices"
+    ).fetchone()[0] or 0.0
+    costs = conn.execute(
+        "SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='betalt'"
+    ).fetchone()[0] or 0.0
+    return max(0.0, revenue - costs)
+
+
+def total_available(conn: sqlite3.Connection) -> float:
+    """Samlet rådighedsbeløb = kassekredit til rådighed + overskudslikviditet."""
+    return available_credit(conn) + profit_liquidity(conn)
+
+
 def next_order_id(conn: sqlite3.Connection) -> str:
     row = conn.execute("SELECT COALESCE(MAX(id), 0) FROM orders").fetchone()
     return f"ORD-{row[0] + 1:04d}"
