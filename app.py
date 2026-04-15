@@ -404,8 +404,8 @@ def _create_order_line(db, customer_order_no: str, customer: str, figure_id: str
                f"Oprettet under {customer_order_no} for {customer}")
     db.commit()
 
-    # Auto økonomi check
-    available = _db.available_credit(db)
+    # Auto økonomi check — brug kassekredit + overskudslikviditet
+    available = _db.total_available(db)
     new_status = "kapital_ok" if available >= cost else "pending_kapital"
     _update_status(db, order_id, new_status)
 
@@ -426,8 +426,9 @@ def salg_ny_kundeordre():
     db = get_db()
     customer      = request.form.get("customer", "").strip()
     delivery_mins = request.form.get("delivery_minutes", "").strip()
-    figure_ids    = request.form.getlist("figure_id")
-    figure_ids    = [f for f in figure_ids if f in REFERENCE_SEQUENCES]
+    figure_ids  = request.form.getlist("figure_id")
+    quantities  = request.form.getlist("quantity")
+    figure_ids  = [f for f in figure_ids if f in REFERENCE_SEQUENCES]
 
     if not customer or not figure_ids:
         flash("Udfyld kundenavn og mindst én figur.", "error")
@@ -460,9 +461,14 @@ def salg_ny_kundeordre():
     db.commit()
 
     created_ids = []
-    for fig in figure_ids:
-        oid = _create_order_line(db, ko_no, customer, fig)
-        created_ids.append(oid)
+    for i, fig in enumerate(figure_ids):
+        try:
+            qty = max(1, int(quantities[i])) if i < len(quantities) else 1
+        except (ValueError, IndexError):
+            qty = 1
+        for _ in range(qty):
+            oid = _create_order_line(db, ko_no, customer, fig)
+            created_ids.append(oid)
 
     exp_label = f" — forventet levering om {delivery_mins} min" if delivery_mins else ""
     flash(
@@ -490,8 +496,13 @@ def salg_tilfoej_produkt(ko_no):
         flash(f"Kunden har ikke rettighed til {figure_id}.", "error")
         return redirect(url_for("salg"))
 
-    oid = _create_order_line(db, ko_no, ko["customer"], figure_id)
-    flash(f"{oid} tilføjet til {ko_no}.", "info")
+    try:
+        qty = max(1, int(request.form.get("quantity", 1)))
+    except ValueError:
+        qty = 1
+
+    created_ids = [_create_order_line(db, ko_no, ko["customer"], figure_id) for _ in range(qty)]
+    flash(f"{len(created_ids)} produkt(er) tilføjet til {ko_no} ({', '.join(created_ids)}).", "info")
     return redirect(url_for("salg"))
 
 
@@ -582,8 +593,10 @@ def oekonomi():
     total_sum = db.execute(
         "SELECT COALESCE(SUM(amount),0) FROM invoices"
     ).fetchone()[0]
-    credit_used  = _db.active_orders_cost(db)
-    credit_avail = _db.available_credit(db)
+    credit_used    = _db.active_orders_cost(db)
+    credit_avail   = _db.available_credit(db)
+    profit         = _db.profit_liquidity(db)
+    total_avail    = _db.total_available(db)
     return render_template("oekonomi.html",
                            pending_kapital=pending_kapital,
                            payments=payments,
@@ -592,7 +605,9 @@ def oekonomi():
                            total_sum=total_sum,
                            credit_used=credit_used,
                            credit_avail=credit_avail,
-                           credit_limit=_db.CREDIT_LIMIT)
+                           credit_limit=_db.CREDIT_LIMIT,
+                           profit=profit,
+                           total_avail=total_avail)
 
 
 @app.post("/oekonomi/godkend_kapital/<order_id>")
