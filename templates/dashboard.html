@@ -179,9 +179,9 @@
         var ratingEl    = document.getElementById('kpi-rating');
         var ratingSubEl = document.getElementById('kpi-rating-sub');
         if (d.avg_rating !== null && d.avg_rating !== undefined) {
-          ratingEl.textContent    = d.avg_rating.toFixed(1) + ' / 10';
+          ratingEl.textContent    = d.avg_rating.toFixed(1) + ' / 5';
           ratingSubEl.textContent = d.rating_count + ' bedømmelse' + (d.rating_count === 1 ? '' : 'r');
-          ratingEl.style.color    = d.avg_rating >= 7 ? '#27ae60' : d.avg_rating >= 4 ? '#d4a017' : '#c0392b';
+          ratingEl.style.color    = d.avg_rating >= 4 ? '#27ae60' : d.avg_rating >= 3 ? '#d4a017' : '#c0392b';
         } else {
           ratingEl.textContent    = '—';
           ratingSubEl.textContent = 'Ingen ratings endnu';
