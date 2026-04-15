@@ -238,7 +238,9 @@ def _mjpeg_frames():
 def dashboard():
     db = get_db()
     orders = db.execute(
-        "SELECT * FROM orders ORDER BY updated_at DESC"
+        "SELECT o.*, co.expected_delivery_at FROM orders o"
+        " LEFT JOIN customer_orders co ON co.customer_order_no = o.customer_order_no"
+        " ORDER BY o.updated_at DESC"
     ).fetchall()
     return render_template("dashboard.html", orders=orders)
 
@@ -264,12 +266,54 @@ def api_kpis():
         "SELECT COALESCE(SUM(amount),0) FROM invoices WHERE invoice_date=?",
         (today,),
     ).fetchone()[0]
+    rating_row = db.execute(
+        "SELECT ROUND(AVG(customer_rating),1), COUNT(customer_rating)"
+        " FROM orders WHERE customer_rating IS NOT NULL"
+    ).fetchone()
+
+    # Penalty: for each KO past deadline with unfinished items
+    now_str = _now()
+    overdue_rows = db.execute(
+        "SELECT co.customer_order_no, co.expected_delivery_at, co.customer,"
+        " COALESCE(SUM(o.selling_price),0) as total_value"
+        " FROM customer_orders co"
+        " JOIN orders o ON o.customer_order_no = co.customer_order_no"
+        " WHERE co.expected_delivery_at IS NOT NULL"
+        "   AND co.expected_delivery_at < ?"
+        "   AND o.status NOT IN ('faktureret','afvist')"
+        " GROUP BY co.customer_order_no",
+        (now_str,),
+    ).fetchall()
+
+    total_penalty = 0.0
+    overdue_list  = []
+    for row in overdue_rows:
+        try:
+            deadline = datetime.strptime(row["expected_delivery_at"], "%Y-%m-%d %H:%M:%S")
+            now_dt   = datetime.now(_TZ).replace(tzinfo=None)
+            mins_late = max(0, int((now_dt - deadline).total_seconds() / 60))
+        except (ValueError, TypeError):
+            mins_late = 0
+        penalty = round(row["total_value"] * 0.01 * mins_late, 0)
+        total_penalty += penalty
+        overdue_list.append({
+            "ko_no":     row["customer_order_no"],
+            "customer":  row["customer"],
+            "mins_late": mins_late,
+            "penalty":   penalty,
+        })
+
     return jsonify({
-        "active_orders": active,
+        "active_orders":    active,
         "pending_approval": pending,
-        "paa_lager": paa_lager,
-        "produced_today": produced_today,
-        "todays_revenue": todays_revenue,
+        "paa_lager":        paa_lager,
+        "produced_today":   produced_today,
+        "todays_revenue":   todays_revenue,
+        "avg_rating":       rating_row[0],
+        "rating_count":     rating_row[1],
+        "total_penalty":    total_penalty,
+        "overdue_count":    len(overdue_list),
+        "overdue":          overdue_list,
     })
 
 
@@ -281,67 +325,131 @@ def api_kpis():
 def salg():
     db = get_db()
     pending_kunde = db.execute(
-        "SELECT * FROM orders WHERE status='pending_kunde' ORDER BY created_at"
+        "SELECT o.*, co.customer_order_no as ko_no, co.expected_delivery_at"
+        " FROM orders o"
+        " LEFT JOIN customer_orders co ON co.customer_order_no = o.customer_order_no"
+        " WHERE o.status='pending_kunde' ORDER BY o.created_at"
     ).fetchall()
     klar_afhentning = db.execute(
-        "SELECT * FROM orders WHERE status='klar_til_afhentning' ORDER BY updated_at DESC"
+        "SELECT o.*, co.expected_delivery_at"
+        " FROM orders o"
+        " LEFT JOIN customer_orders co ON co.customer_order_no = o.customer_order_no"
+        " WHERE o.status='klar_til_afhentning' ORDER BY o.updated_at DESC"
     ).fetchall()
     afhentet = db.execute(
-        "SELECT o.* FROM orders o"
+        "SELECT o.*, co.expected_delivery_at FROM orders o"
         " LEFT JOIN invoices i ON o.order_id=i.order_id"
+        " LEFT JOIN customer_orders co ON co.customer_order_no = o.customer_order_no"
         " WHERE o.status='afhentet' AND i.id IS NULL"
         " ORDER BY o.updated_at DESC"
+    ).fetchall()
+    # Open KOs for adding more items
+    open_kos = db.execute(
+        "SELECT co.*, COUNT(o.id) as item_count"
+        " FROM customer_orders co"
+        " LEFT JOIN orders o ON o.customer_order_no = co.customer_order_no"
+        " WHERE co.expected_delivery_at > ? OR co.expected_delivery_at IS NULL"
+        " GROUP BY co.customer_order_no"
+        " ORDER BY co.created_at DESC LIMIT 20",
+        (_now(),),
     ).fetchall()
     return render_template("salg.html",
                            pending_kunde=pending_kunde,
                            klar_afhentning=klar_afhentning,
-                           afhentet=afhentet)
+                           afhentet=afhentet,
+                           open_kos=open_kos,
+                           now=_now())
 
 
-@app.post("/salg/ny_ordre")
-def salg_ny_ordre():
-    db = get_db()
-    customer  = request.form.get("customer", "").strip()
-    figure_id = request.form.get("figure_id", "").strip()
-
-    if not customer or not figure_id:
-        flash("Udfyld alle felter.", "error")
-        return redirect(url_for("salg"))
-    if figure_id not in REFERENCE_SEQUENCES:
-        flash("Ukendt figur-ID.", "error")
-        return redirect(url_for("salg"))
-
+def _create_order_line(db, customer_order_no: str, customer: str, figure_id: str) -> str:
+    """Create one order line item under a KO. Returns order_id."""
     order_id      = _db.next_order_id(db)
     cost          = _db.figure_cost(db, figure_id)
     selling_price = _db.figure_selling_price(figure_id, customer)
 
     db.execute(
-        "INSERT INTO orders (order_id, customer, figure_id, status, estimated_cost, selling_price)"
-        " VALUES (?, ?, ?, 'oekonomi_check', ?, ?)",
-        (order_id, customer, figure_id, cost, selling_price),
+        "INSERT INTO orders"
+        " (order_id, customer_order_no, customer, figure_id, status, estimated_cost, selling_price)"
+        " VALUES (?, ?, ?, ?, 'oekonomi_check', ?, ?)",
+        (order_id, customer_order_no, customer, figure_id, cost, selling_price),
     )
-    _log_event(db, order_id, "ny_ordre", f"Ordre oprettet af Salg for {customer}")
+    _log_event(db, order_id, "ny_ordre",
+               f"Oprettet under {customer_order_no} for {customer}")
     db.commit()
 
-    # Auto-run økonomi check
+    # Auto økonomi check
     available = _db.available_credit(db)
-    if available >= cost:
-        new_status = "kapital_ok"
-    else:
-        new_status = "pending_kapital"
+    new_status = "kapital_ok" if available >= cost else "pending_kapital"
     _update_status(db, order_id, new_status)
 
-    # If kapital_ok, check for auto-approved customer
     if new_status == "kapital_ok":
         if customer in _db.AUTO_APPROVE_CUSTOMERS:
             _update_status(db, order_id, "kunde_godkendt")
-            flash(f"Ordre {order_id} oprettet og auto-godkendt (prioritetskunde).", "info")
         else:
             _update_status(db, order_id, "pending_kunde")
-            flash(f"Ordre {order_id} oprettet — afventer kundegodkendelse.", "info")
-    else:
-        flash(f"Ordre {order_id} oprettet — afventer kapital-godkendelse.", "info")
 
+    return order_id
+
+
+@app.post("/salg/ny_kundeordre")
+def salg_ny_kundeordre():
+    """Create a new customer order (KO) with one or more figures."""
+    db = get_db()
+    customer      = request.form.get("customer", "").strip()
+    delivery_mins = request.form.get("delivery_minutes", "").strip()
+    figure_ids    = request.form.getlist("figure_id")
+    figure_ids    = [f for f in figure_ids if f in REFERENCE_SEQUENCES]
+
+    if not customer or not figure_ids:
+        flash("Udfyld kundenavn og mindst én figur.", "error")
+        return redirect(url_for("salg"))
+
+    # Expected delivery datetime
+    expected_at = None
+    if delivery_mins:
+        try:
+            mins = int(delivery_mins)
+            from datetime import timedelta
+            expected_at = (datetime.now(_TZ) + timedelta(minutes=mins)).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            pass
+
+    ko_no = _db.next_customer_order_no(db)
+    db.execute(
+        "INSERT INTO customer_orders (customer_order_no, customer, expected_delivery_at)"
+        " VALUES (?, ?, ?)",
+        (ko_no, customer, expected_at),
+    )
+    db.commit()
+
+    created_ids = []
+    for fig in figure_ids:
+        oid = _create_order_line(db, ko_no, customer, fig)
+        created_ids.append(oid)
+
+    exp_label = f" — forventet levering om {delivery_mins} min" if delivery_mins else ""
+    flash(
+        f"Kundeordre {ko_no} oprettet med {len(created_ids)} produkt(er)"
+        f" ({', '.join(created_ids)}){exp_label}.",
+        "info",
+    )
+    return redirect(url_for("salg"))
+
+
+@app.post("/salg/tilfoej_produkt/<ko_no>")
+def salg_tilfoej_produkt(ko_no):
+    """Add an extra line item to an existing KO."""
+    db = get_db()
+    figure_id = request.form.get("figure_id", "").strip()
+    ko = db.execute(
+        "SELECT * FROM customer_orders WHERE customer_order_no=?", (ko_no,)
+    ).fetchone()
+    if not ko or figure_id not in REFERENCE_SEQUENCES:
+        flash("Ugyldig kundeordre eller figur.", "error")
+        return redirect(url_for("salg"))
+
+    oid = _create_order_line(db, ko_no, ko["customer"], figure_id)
+    flash(f"{oid} tilføjet til {ko_no}.", "info")
     return redirect(url_for("salg"))
 
 
@@ -678,13 +786,32 @@ def indkoeb_bekraeft(order_id):
 def produktion():
     db = get_db()
     klar = db.execute(
-        "SELECT * FROM orders WHERE status='klar_til_produktion' ORDER BY updated_at"
+        "SELECT o.*, co.expected_delivery_at, co.customer_order_no as ko_no"
+        " FROM orders o"
+        " LEFT JOIN customer_orders co ON co.customer_order_no = o.customer_order_no"
+        " WHERE o.status='klar_til_produktion' ORDER BY o.updated_at"
     ).fetchall()
     i_prod = db.execute(
-        "SELECT * FROM orders WHERE status='i_produktion' ORDER BY updated_at"
+        "SELECT o.*, co.expected_delivery_at, co.customer_order_no as ko_no"
+        " FROM orders o"
+        " LEFT JOIN customer_orders co ON co.customer_order_no = o.customer_order_no"
+        " WHERE o.status='i_produktion' ORDER BY o.updated_at"
     ).fetchall()
-    return render_template("produktion.html", klar=klar, i_prod=i_prod,
-                           sequences=REFERENCE_SEQUENCES)
+
+    # Group orders by KO so we can show all instructions per KO together
+    def group_by_ko(orders):
+        groups = {}
+        for o in orders:
+            key = o["customer_order_no"] or o["order_id"]
+            groups.setdefault(key, []).append(o)
+        return groups
+
+    return render_template("produktion.html",
+                           klar=klar, i_prod=i_prod,
+                           klar_by_ko=group_by_ko(klar),
+                           i_prod_by_ko=group_by_ko(i_prod),
+                           sequences=REFERENCE_SEQUENCES,
+                           now=_now())
 
 
 @app.post("/produktion/hent/<order_id>")
@@ -911,6 +1038,43 @@ def historik():
         "SELECT * FROM orders ORDER BY created_at DESC"
     ).fetchall()
     return render_template("historik.html", orders=orders)
+
+
+@app.get("/kundeordre/<ko_no>")
+def kundeordre_detail(ko_no):
+    db = get_db()
+    ko = db.execute(
+        "SELECT * FROM customer_orders WHERE customer_order_no=?", (ko_no,)
+    ).fetchone()
+    if not ko:
+        flash("Kundeordre ikke fundet.", "error")
+        return redirect(url_for("historik"))
+    items = db.execute(
+        "SELECT * FROM orders WHERE customer_order_no=? ORDER BY created_at",
+        (ko_no,),
+    ).fetchall()
+
+    # Penalty calculation
+    penalty_per_min = sum(o["selling_price"] or 0 for o in items) * 0.01
+    mins_late = 0
+    if ko["expected_delivery_at"]:
+        try:
+            deadline = datetime.strptime(ko["expected_delivery_at"], "%Y-%m-%d %H:%M:%S")
+            now_dt   = datetime.now(_TZ).replace(tzinfo=None)
+            mins_late = max(0, int((now_dt - deadline).total_seconds() / 60))
+        except ValueError:
+            pass
+
+    all_done = all(o["status"] in ("faktureret", "afvist") for o in items)
+
+    return render_template("kundeordre_detail.html",
+                           ko=ko,
+                           items=items,
+                           penalty_per_min=penalty_per_min,
+                           mins_late=mins_late,
+                           all_done=all_done,
+                           status_labels=_db.STATUS_LABELS,
+                           now=_now())
 
 
 @app.get("/ordre/<order_id>")

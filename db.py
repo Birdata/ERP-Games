@@ -92,16 +92,27 @@ STATUS_LABELS: dict[str, str] = {
 }
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS customer_orders (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_order_no    TEXT UNIQUE NOT NULL,
+    customer             TEXT NOT NULL,
+    expected_delivery_at DATETIME,
+    created_at           DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS orders (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id                TEXT UNIQUE NOT NULL,
+    customer_order_no       TEXT,
     customer                TEXT NOT NULL,
     figure_id               TEXT NOT NULL,
     status                  TEXT NOT NULL DEFAULT 'ny_ordre',
     holdeplads              TEXT,
+    quantity                INTEGER DEFAULT 1,
     estimated_cost          REAL,
     actual_cost             REAL,
     selling_price           REAL,
+    customer_rating         INTEGER,
     qc_result               TEXT,
     prod_pickup_requested   INTEGER DEFAULT 0,
     prod_delivery_confirmed INTEGER DEFAULT 0,
@@ -171,7 +182,10 @@ def _add_column_if_missing(conn: sqlite3.Connection,
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
     # Migrations for existing databases
-    _add_column_if_missing(conn, "orders", "selling_price", "REAL")
+    _add_column_if_missing(conn, "orders", "selling_price",       "REAL")
+    _add_column_if_missing(conn, "orders", "quantity",            "INTEGER DEFAULT 1")
+    _add_column_if_missing(conn, "orders", "customer_rating",     "INTEGER")
+    _add_column_if_missing(conn, "orders", "customer_order_no",   "TEXT")
 
     # Reseed component prices if the catalogue has changed (check for new varenumre)
     existing = {
@@ -225,6 +239,11 @@ def available_credit(conn: sqlite3.Connection) -> float:
 def next_order_id(conn: sqlite3.Connection) -> str:
     row = conn.execute("SELECT COALESCE(MAX(id), 0) FROM orders").fetchone()
     return f"ORD-{row[0] + 1:04d}"
+
+
+def next_customer_order_no(conn: sqlite3.Connection) -> str:
+    row = conn.execute("SELECT COALESCE(MAX(id), 0) FROM customer_orders").fetchone()
+    return f"KO-{row[0] + 1:04d}"
 
 
 def assign_holdeplads(conn: sqlite3.Connection) -> str:

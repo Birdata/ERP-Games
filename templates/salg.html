@@ -7,30 +7,83 @@
   <p>Ordremodtagelse, kundegodkendelse og afhentning.</p>
 </div>
 
-{# ── 1. Ny ordre ──────────────────────────────────────────── #}
+{# ── 1. Ny kundeordre ─────────────────────────────────────── #}
 <div class="section-block">
-  <div class="section-head"><h2>Opret ny ordre</h2></div>
+  <div class="section-head"><h2>Opret ny kundeordre</h2></div>
   <div style="padding:1.25rem 1.4rem;">
-    <form method="POST" action="{{ url_for('salg_ny_ordre') }}">
+    <form method="POST" action="{{ url_for('salg_ny_kundeordre') }}" id="ko-form">
       <div class="form-row">
         <div class="form-group">
           <label for="customer">Kundenavn</label>
-          <input type="text" id="customer" name="customer" placeholder="f.eks. Navy Seal" required />
+          <input type="text" id="customer" name="customer"
+                 placeholder="f.eks. Navy Seal" required />
         </div>
         <div class="form-group">
-          <label for="figure_id">Figur-ID</label>
-          <select id="figure_id" name="figure_id" required>
+          <label for="delivery_minutes">Forventet levering (minutter)</label>
+          <input type="number" id="delivery_minutes" name="delivery_minutes"
+                 min="1" max="9999" placeholder="f.eks. 60" />
+        </div>
+      </div>
+
+      <div style="margin:.75rem 0 .5rem; font-size:.85rem; font-weight:600; color:var(--text-muted);">
+        Produkter
+      </div>
+      <div id="figurer" style="display:flex; flex-direction:column; gap:.5rem; margin-bottom:.75rem;">
+        <div class="figur-row" style="display:flex; gap:.5rem; align-items:center;">
+          <select name="figure_id" required style="flex:1; max-width:240px;">
             <option value="" disabled selected>— vælg figur —</option>
             {% for fig in figures %}
               <option value="{{ fig }}">{{ fig }}</option>
             {% endfor %}
           </select>
+          <button type="button" class="btn btn-secondary btn-sm"
+                  onclick="removeFigur(this)" style="padding:.3rem .7rem;">✕</button>
         </div>
       </div>
-      <button type="submit" class="btn btn-primary">Opret ordre</button>
+
+      <div style="display:flex; gap:.75rem; align-items:center; flex-wrap:wrap;">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="addFigur()">
+          + Tilføj produkt
+        </button>
+        <button type="submit" class="btn btn-primary">Opret kundeordre</button>
+      </div>
     </form>
   </div>
 </div>
+
+{# ── 1b. Tilføj til eksisterende KO ─────────────────────── #}
+{% if open_kos %}
+<div class="section-block">
+  <div class="section-head">
+    <h2>Tilføj produkt til eksisterende kundeordre</h2>
+    <span class="section-count">{{ open_kos | length }} åbne</span>
+  </div>
+  <div style="padding:1rem 1.4rem; display:flex; flex-direction:column; gap:.75rem;">
+    {% for ko in open_kos %}
+    <div style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;
+                background:var(--surface-2,#1e1e1e); padding:.6rem .9rem; border-radius:.4rem;">
+      <span style="font-weight:600;">{{ ko.customer_order_no }}</span>
+      <span style="color:var(--text-muted); font-size:.85rem;">{{ ko.customer }}</span>
+      {% if ko.expected_delivery_at %}
+        <span class="deadline-badge" data-deadline="{{ ko.expected_delivery_at }}"
+              style="font-size:.78rem;">{{ ko.expected_delivery_at[:16] }}</span>
+      {% endif %}
+      <span style="color:var(--text-muted); font-size:.82rem;">{{ ko.item_count }} produkt(er)</span>
+      <form method="POST" action="{{ url_for('salg_tilfoej_produkt', ko_no=ko.customer_order_no) }}"
+            style="display:flex; gap:.5rem; align-items:center; margin-left:auto;">
+        <select name="figure_id" required style="min-width:160px;">
+          <option value="" disabled selected>— vælg figur —</option>
+          {% for fig in figures %}
+            <option value="{{ fig }}">{{ fig }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-primary btn-sm">Tilføj</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
 
 {# ── 2. Afventer kundegodkendelse ────────────────────────── #}
 <div class="section-block">
@@ -38,15 +91,16 @@
     <h2>Afventer kundegodkendelse</h2>
     <span class="section-count">{{ pending_kunde | length }}</span>
   </div>
-
   {% if pending_kunde %}
   <table class="data-table">
     <thead>
       <tr>
+        <th>Kundeordre</th>
         <th>Ordre-ID</th>
         <th>Kunde</th>
         <th>Figur</th>
         <th>Est. pris</th>
+        <th>Deadline</th>
         <th>Oprettet</th>
         <th>Handling</th>
       </tr>
@@ -54,11 +108,26 @@
     <tbody>
       {% for o in pending_kunde %}
       <tr>
-        <td><span class="order-id">{{ o.order_id }}</span></td>
+        <td>
+          {% if o.customer_order_no %}
+            <a href="{{ url_for('kundeordre_detail', ko_no=o.customer_order_no) }}"
+               style="font-weight:600; color:var(--accent);">{{ o.customer_order_no }}</a>
+          {% else %}—{% endif %}
+        </td>
+        <td><a href="{{ url_for('ordre_detail', order_id=o.order_id) }}"
+               class="order-id" style="text-decoration:none;">{{ o.order_id }}</a></td>
         <td>{{ o.customer }}</td>
         <td>{{ o.figure_id }}</td>
         <td class="amount">{{ "{:,.0f}".format(o.estimated_cost or 0) }} kr</td>
-        <td style="color:var(--text-muted);font-size:.82rem;">{{ o.created_at[:16] }}</td>
+        <td>
+          {% if o.expected_delivery_at %}
+            <span class="deadline-badge" data-deadline="{{ o.expected_delivery_at }}"
+                  style="font-size:.78rem;">{{ o.expected_delivery_at[:16] }}</span>
+          {% else %}—{% endif %}
+        </td>
+        <td style="color:var(--text-muted);font-size:.82rem;white-space:nowrap;">
+          {{ o.created_at[:16] }}
+        </td>
         <td>
           <div class="action-group">
             <form method="POST" action="{{ url_for('salg_godkend_kunde', order_id=o.order_id) }}" style="display:inline;">
@@ -84,15 +153,16 @@
     <h2>Klar til afhentning</h2>
     <span class="section-count">{{ klar_afhentning | length }}</span>
   </div>
-
   {% if klar_afhentning %}
   <table class="data-table">
     <thead>
       <tr>
+        <th>Kundeordre</th>
         <th>Ordre-ID</th>
         <th>Kunde</th>
         <th>Figur</th>
         <th>Holdeplads</th>
+        <th>Deadline</th>
         <th>Status</th>
         <th>Handling</th>
       </tr>
@@ -100,15 +170,25 @@
     <tbody>
       {% for o in klar_afhentning %}
       <tr>
-        <td><span class="order-id">{{ o.order_id }}</span></td>
+        <td>
+          {% if o.customer_order_no %}
+            <a href="{{ url_for('kundeordre_detail', ko_no=o.customer_order_no) }}"
+               style="font-weight:600; color:var(--accent);">{{ o.customer_order_no }}</a>
+          {% else %}—{% endif %}
+        </td>
+        <td><a href="{{ url_for('ordre_detail', order_id=o.order_id) }}"
+               class="order-id" style="text-decoration:none;">{{ o.order_id }}</a></td>
         <td>{{ o.customer }}</td>
         <td>{{ o.figure_id }}</td>
         <td>
-          {% if o.holdeplads %}
-            <strong>{{ o.holdeplads }}</strong>
-          {% else %}
-            <span style="color:var(--text-muted);">—</span>
-          {% endif %}
+          {% if o.holdeplads %}<strong>{{ o.holdeplads }}</strong>
+          {% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
+        </td>
+        <td>
+          {% if o.expected_delivery_at %}
+            <span class="deadline-badge" data-deadline="{{ o.expected_delivery_at }}"
+                  style="font-size:.78rem;">{{ o.expected_delivery_at[:16] }}</span>
+          {% else %}—{% endif %}
         </td>
         <td>
           {% if o.salg_pickup_requested %}
@@ -119,8 +199,25 @@
         </td>
         <td>
           {% if not o.salg_pickup_requested %}
-          <form method="POST" action="{{ url_for('salg_registrer_afhentning', order_id=o.order_id) }}" style="display:inline;">
-            <button class="btn btn-primary btn-sm">Registrér afhentning</button>
+          <form method="POST" action="{{ url_for('salg_registrer_afhentning', order_id=o.order_id) }}">
+            <div style="display:flex; flex-direction:column; gap:.5rem; align-items:flex-start;">
+              <div class="rating-group" style="display:flex; gap:.25rem;">
+                {% for n in range(1, 11) %}
+                <label style="cursor:pointer;">
+                  <input type="radio" name="customer_rating" value="{{ n }}"
+                         style="display:none;" class="rating-radio" data-order="{{ o.order_id }}">
+                  <span class="rating-btn" id="rb-{{ o.order_id }}-{{ n }}"
+                        style="display:inline-block; width:1.7rem; line-height:1.7rem;
+                               text-align:center; border-radius:.3rem; font-size:.78rem;
+                               font-weight:600; background:var(--surface-2,#2a2a2a);
+                               color:var(--text-muted); cursor:pointer; transition:background .15s;">
+                    {{ n }}
+                  </span>
+                </label>
+                {% endfor %}
+              </div>
+              <button type="submit" class="btn btn-primary btn-sm">Registrér afhentning</button>
+            </div>
           </form>
           {% else %}
             <span style="color:var(--text-muted);font-size:.82rem;font-style:italic;">Afventer logistik…</span>
@@ -141,12 +238,18 @@
     <h2>Afhentet — fakturer</h2>
     <span class="section-count">{{ afhentet | length }}</span>
   </div>
-
   {% if afhentet %}
     {% for o in afhentet %}
     <div style="padding:1.1rem 1.4rem; border-bottom:1px solid var(--border);">
       <div style="display:flex; align-items:center; gap:1.5rem; margin-bottom:.75rem; flex-wrap:wrap;">
-        <span class="order-id">{{ o.order_id }}</span>
+        {% if o.customer_order_no %}
+          <a href="{{ url_for('kundeordre_detail', ko_no=o.customer_order_no) }}"
+             style="font-weight:600; color:var(--accent); font-size:.9rem;">
+            {{ o.customer_order_no }}
+          </a>
+        {% endif %}
+        <a href="{{ url_for('ordre_detail', order_id=o.order_id) }}"
+           class="order-id" style="text-decoration:none;">{{ o.order_id }}</a>
         <span>{{ o.customer }}</span>
         <span style="color:var(--text-muted);">{{ o.figure_id }}</span>
         {% if o.selling_price %}
@@ -158,6 +261,10 @@
           <span style="color:var(--text-muted);font-size:.82rem;">
             Komponentomk.: {{ "{:,.0f}".format(o.actual_cost) }} kr
           </span>
+        {% endif %}
+        {% if o.expected_delivery_at %}
+          <span class="deadline-badge" data-deadline="{{ o.expected_delivery_at }}"
+                style="font-size:.78rem;">Deadline: {{ o.expected_delivery_at[:16] }}</span>
         {% endif %}
       </div>
       <form method="POST" action="{{ url_for('salg_opret_faktura', order_id=o.order_id) }}"
@@ -176,4 +283,81 @@
   {% endif %}
 </div>
 
+<script>
+// ── Dynamic figure rows ───────────────────────────────────
+const figOptions = `{% for fig in figures %}<option value="{{ fig }}">{{ fig }}</option>{% endfor %}`;
+
+function addFigur() {
+  const container = document.getElementById('figurer');
+  const div = document.createElement('div');
+  div.className = 'figur-row';
+  div.style.cssText = 'display:flex; gap:.5rem; align-items:center;';
+  div.innerHTML = `
+    <select name="figure_id" required style="flex:1; max-width:240px;">
+      <option value="" disabled selected>— vælg figur —</option>
+      ${figOptions}
+    </select>
+    <button type="button" class="btn btn-secondary btn-sm"
+            onclick="removeFigur(this)" style="padding:.3rem .7rem;">✕</button>`;
+  container.appendChild(div);
+}
+
+function removeFigur(btn) {
+  const rows = document.querySelectorAll('.figur-row');
+  if (rows.length > 1) btn.closest('.figur-row').remove();
+}
+
+// ── Rating highlight ──────────────────────────────────────
+function ratingColor(n) {
+  if (n <= 3) return { bg:'#c0392b', fg:'#fff' };
+  if (n <= 6) return { bg:'#d4a017', fg:'#fff' };
+  return { bg:'#27ae60', fg:'#fff' };
+}
+document.querySelectorAll('.rating-radio').forEach(function(radio) {
+  radio.addEventListener('change', function() {
+    const orderId = this.dataset.order;
+    const chosen  = parseInt(this.value);
+    for (let i = 1; i <= 10; i++) {
+      const btn = document.getElementById('rb-' + orderId + '-' + i);
+      if (!btn) continue;
+      if (i <= chosen) {
+        const c = ratingColor(chosen);
+        btn.style.background = c.bg;
+        btn.style.color      = c.fg;
+      } else {
+        btn.style.background = '';
+        btn.style.color      = '';
+      }
+    }
+  });
+});
+
+// ── Deadline badges ───────────────────────────────────────
+(function () {
+  function updateDeadlines() {
+    const now = new Date();
+    document.querySelectorAll('.deadline-badge[data-deadline]').forEach(function(el) {
+      const raw = el.dataset.deadline;
+      if (!raw) return;
+      const d = new Date(raw.replace(' ', 'T'));
+      if (isNaN(d)) return;
+      const diffMs  = d - now;
+      const diffMin = Math.round(diffMs / 60000);
+      if (diffMs < 0) {
+        const late = Math.abs(diffMin);
+        el.textContent = '⚠ ' + late + ' min forsinket';
+        el.style.cssText = 'background:#c0392b22; color:#e55; border:1px solid #c0392b55; padding:.15rem .4rem; border-radius:.25rem; font-size:.78rem; font-weight:600;';
+      } else if (diffMin <= 10) {
+        el.textContent = '⏱ ' + diffMin + ' min tilbage';
+        el.style.cssText = 'background:#d4a01722; color:#d4a017; border:1px solid #d4a01755; padding:.15rem .4rem; border-radius:.25rem; font-size:.78rem; font-weight:600;';
+      } else {
+        el.textContent = diffMin + ' min tilbage';
+        el.style.cssText = 'color:var(--text-muted); font-size:.78rem;';
+      }
+    });
+  }
+  updateDeadlines();
+  setInterval(updateDeadlines, 30000);
+})();
+</script>
 {% endblock %}

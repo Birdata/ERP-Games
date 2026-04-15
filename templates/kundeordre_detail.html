@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}{{ ko.customer_order_no }} — LEGO ERP{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:1rem;">
+  <div>
+    <h1 style="display:flex; align-items:center; gap:.75rem;">
+      <span style="font-size:1.4rem; font-weight:700; color:var(--accent);">{{ ko.customer_order_no }}</span>
+      {% if all_done %}
+        <span class="pill pill-faktureret">Afsluttet</span>
+      {% elif mins_late > 0 %}
+        <span class="pill" style="background:#c0392b22; color:#e55; border:1px solid #c0392b55;">
+          ⚠ {{ mins_late }} min forsinket
+        </span>
+      {% else %}
+        <span class="pill pill-i_produktion">Aktiv</span>
+      {% endif %}
+    </h1>
+    <p style="margin:.25rem 0 0;">{{ ko.customer }}</p>
+  </div>
+  <a href="{{ url_for('historik') }}" class="btn btn-secondary btn-sm" style="margin-top:.25rem;">
+    ← Tilbage til historik
+  </a>
+</div>
+
+{# ── Summary strip ────────────────────────────────────────── #}
+<div class="kpi-grid" style="margin-bottom:2rem;">
+
+  <div class="kpi-card">
+    <div class="kpi-label">Oprettet</div>
+    <div class="kpi-value" style="font-size:1rem;">{{ ko.created_at[:16] }}</div>
+    <div class="kpi-sub">Tidspunkt</div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-label">Forventet levering</div>
+    {% if ko.expected_delivery_at %}
+      <div class="kpi-value" style="font-size:1rem;" id="ko-deadline">
+        {{ ko.expected_delivery_at[:16] }}
+      </div>
+      <div class="kpi-sub" id="ko-countdown">beregner…</div>
+    {% else %}
+      <div class="kpi-value" style="font-size:1rem;">—</div>
+      <div class="kpi-sub">Ingen deadline sat</div>
+    {% endif %}
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-label">Antal produkter</div>
+    <div class="kpi-value">{{ items | length }}</div>
+    <div class="kpi-sub">Linjer i ordren</div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-label">Samlet ordreværdi</div>
+    <div class="kpi-value" style="font-size:1rem;">
+      {{ "{:,.0f}".format(items | sum(attribute='selling_price') or 0) }} kr
+    </div>
+    <div class="kpi-sub">Salgspris ink. rabat</div>
+  </div>
+
+  {% if mins_late > 0 %}
+  <div class="kpi-card" style="border-top-color:#c0392b;">
+    <div class="kpi-label" style="color:#e55;">Forsinkelsestab nu</div>
+    <div class="kpi-value" style="font-size:1rem; color:#c0392b;" id="ko-penalty">
+      {{ "{:,.0f}".format((items | sum(attribute='selling_price') or 0) * 0.01 * mins_late) }} kr
+    </div>
+    <div class="kpi-sub">1 % × ordreværdi × {{ mins_late }} min</div>
+  </div>
+  {% endif %}
+
+</div>
+
+{# ── Produktliste ─────────────────────────────────────────── #}
+<div class="section-block">
+  <div class="section-head">
+    <h2>Produkter i kundeordren</h2>
+    <span class="section-count">{{ items | length }}</span>
+  </div>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Ordre-ID</th>
+        <th>Figur</th>
+        <th>Status</th>
+        <th>Salgspris</th>
+        <th>QC</th>
+        <th>Oprettet</th>
+        <th>Sidst opdateret</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in items %}
+      <tr>
+        <td>
+          <a href="{{ url_for('ordre_detail', order_id=o.order_id) }}"
+             class="order-id" style="text-decoration:none;">{{ o.order_id }}</a>
+        </td>
+        <td>{{ o.figure_id }}</td>
+        <td>
+          <span class="pill pill-{{ o.status }}">
+            {{ status_labels.get(o.status, o.status) }}
+          </span>
+        </td>
+        <td class="amount" style="font-size:.85rem;">
+          {{ "{:,.0f}".format(o.selling_price or 0) }} kr
+        </td>
+        <td>
+          {% if o.qc_result %}
+            <span style="color: {{ '#27ae60' if o.qc_result == 'pass' else '#c0392b' }}; font-size:.82rem;">
+              {{ 'Godkendt' if o.qc_result == 'pass' else 'Fejlet' }}
+            </span>
+          {% else %}
+            <span style="color:var(--text-muted);font-size:.82rem;">—</span>
+          {% endif %}
+        </td>
+        <td style="color:var(--text-muted);font-size:.78rem;white-space:nowrap;">
+          {{ o.created_at[:16] }}
+        </td>
+        <td style="color:var(--text-muted);font-size:.78rem;white-space:nowrap;">
+          {{ o.updated_at[:16] }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+(function () {
+  {% if ko.expected_delivery_at %}
+  var deadline    = new Date("{{ ko.expected_delivery_at }}".replace(' ', 'T'));
+  var totalValue  = {{ (items | sum(attribute='selling_price') or 0) | round | int }};
+  var countdownEl = document.getElementById('ko-countdown');
+  var penaltyEl   = document.getElementById('ko-penalty');
+
+  function tick() {
+    var now     = new Date();
+    var diffMs  = deadline - now;
+    var diffMin = Math.round(Math.abs(diffMs) / 60000);
+    if (diffMs > 0) {
+      countdownEl.textContent = diffMin + ' min tilbage';
+      countdownEl.style.color = diffMin <= 10 ? '#d4a017' : '';
+    } else {
+      countdownEl.textContent = '⚠ ' + diffMin + ' min forsinket';
+      countdownEl.style.color = '#e55';
+      if (penaltyEl) {
+        var penalty = (totalValue * 0.01 * diffMin).toLocaleString('da-DK', {maximumFractionDigits:0}) + ' kr';
+        penaltyEl.textContent = penalty;
+      }
+    }
+  }
+  tick();
+  setInterval(tick, 30000);
+  {% endif %}
+})();
+</script>
+{% endblock %}

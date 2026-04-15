@@ -40,6 +40,18 @@
     <div class="kpi-sub">Faktureret i dag</div>
   </div>
 
+  <div class="kpi-card kpi-rating">
+    <div class="kpi-label">Kundetilfredshed</div>
+    <div class="kpi-value" id="kpi-rating">—</div>
+    <div class="kpi-sub" id="kpi-rating-sub">Ingen ratings endnu</div>
+  </div>
+
+  <div class="kpi-card kpi-penalty">
+    <div class="kpi-label">Forsinkelsestab</div>
+    <div class="kpi-value" id="kpi-penalty">—</div>
+    <div class="kpi-sub" id="kpi-penalty-sub">1 % / min pr. forsinket KO</div>
+  </div>
+
 </div>
 
 {# ── Orders Table ───────────────────────────────────────────── #}
@@ -53,11 +65,13 @@
   <table class="data-table">
     <thead>
       <tr>
+        <th>Kundeordre</th>
         <th>Ordre-ID</th>
         <th>Kunde</th>
         <th>Figur</th>
         <th>Nuværende trin</th>
         <th>Afdeling</th>
+        <th>Deadline</th>
         <th>Opdateret</th>
       </tr>
     </thead>
@@ -83,6 +97,16 @@
       {% for o in orders %}
       <tr>
         <td>
+          {% if o.customer_order_no %}
+            <a href="{{ url_for('kundeordre_detail', ko_no=o.customer_order_no) }}"
+               style="font-weight:600; color:var(--accent); font-size:.85rem;">
+              {{ o.customer_order_no }}
+            </a>
+          {% else %}
+            <span style="color:var(--text-muted);">—</span>
+          {% endif %}
+        </td>
+        <td>
           <a href="{{ url_for('ordre_detail', order_id=o.order_id) }}"
              class="order-id" style="text-decoration:none;">{{ o.order_id }}</a>
         </td>
@@ -95,6 +119,16 @@
         </td>
         <td style="color:var(--text-muted); font-size:.82rem;">
           {{ dept_map.get(o.status, '—') }}
+        </td>
+        <td style="font-size:.78rem; white-space:nowrap;">
+          {% if o.customer_order_no %}
+            {# deadline fetched from join — injected by route or shown blank #}
+            <span class="deadline-badge"
+                  data-deadline="{{ o.expected_delivery_at if o.expected_delivery_at is defined else '' }}"
+                  style="font-size:.78rem;">
+              {{ o.expected_delivery_at[:16] if o.expected_delivery_at is defined and o.expected_delivery_at else '—' }}
+            </span>
+          {% else %}—{% endif %}
         </td>
         <td style="color:var(--text-muted); font-size:.82rem; white-space:nowrap;">
           {{ o.updated_at[:16] if o.updated_at else '—' }}
@@ -128,11 +162,64 @@
         document.getElementById('kpi-stock').textContent    = fmt(d.paa_lager);
         document.getElementById('kpi-produced').textContent = fmt(d.produced_today);
         document.getElementById('kpi-revenue').textContent  = fmtKr(d.todays_revenue);
+
+        // Rating
+        var ratingEl    = document.getElementById('kpi-rating');
+        var ratingSubEl = document.getElementById('kpi-rating-sub');
+        if (d.avg_rating !== null && d.avg_rating !== undefined) {
+          ratingEl.textContent    = d.avg_rating.toFixed(1) + ' / 10';
+          ratingSubEl.textContent = d.rating_count + ' bedømmelse' + (d.rating_count === 1 ? '' : 'r');
+          ratingEl.style.color    = d.avg_rating >= 7 ? '#27ae60' : d.avg_rating >= 4 ? '#d4a017' : '#c0392b';
+        } else {
+          ratingEl.textContent    = '—';
+          ratingSubEl.textContent = 'Ingen ratings endnu';
+          ratingEl.style.color    = '';
+        }
+
+        // Penalty
+        var penaltyEl    = document.getElementById('kpi-penalty');
+        var penaltySubEl = document.getElementById('kpi-penalty-sub');
+        if (d.total_penalty > 0) {
+          penaltyEl.textContent    = fmtKr(d.total_penalty);
+          penaltyEl.style.color    = '#c0392b';
+          penaltySubEl.textContent = d.overdue_count + ' forsinket KO';
+        } else {
+          penaltyEl.textContent    = '0 kr';
+          penaltyEl.style.color    = '#27ae60';
+          penaltySubEl.textContent = 'Ingen forsinkelser';
+        }
       })
       .catch(() => {});
   }
   loadKPIs();
   setInterval(loadKPIs, 15000);
+
+  // Deadline badges
+  (function () {
+    function updateDeadlines() {
+      var now = new Date();
+      document.querySelectorAll('.deadline-badge[data-deadline]').forEach(function(el) {
+        var raw = el.dataset.deadline;
+        if (!raw || raw === '') { el.textContent = '—'; return; }
+        var d = new Date(raw.replace(' ', 'T'));
+        if (isNaN(d)) return;
+        var diffMs  = d - now;
+        var diffMin = Math.round(diffMs / 60000);
+        if (diffMs < 0) {
+          el.textContent = '⚠ ' + Math.abs(diffMin) + ' min forsinket';
+          el.style.cssText = 'background:#c0392b22;color:#e55;border:1px solid #c0392b55;padding:.15rem .4rem;border-radius:.25rem;font-size:.78rem;font-weight:600;';
+        } else if (diffMin <= 10) {
+          el.textContent = '⏱ ' + diffMin + ' min tilbage';
+          el.style.cssText = 'background:#d4a01722;color:#d4a017;border:1px solid #d4a01755;padding:.15rem .4rem;border-radius:.25rem;font-size:.78rem;font-weight:600;';
+        } else {
+          el.textContent = diffMin + ' min tilbage';
+          el.style.cssText = 'color:var(--text-muted);font-size:.78rem;';
+        }
+      });
+    }
+    updateDeadlines();
+    setInterval(updateDeadlines, 30000);
+  })();
 })();
 </script>
 {% endblock %}
