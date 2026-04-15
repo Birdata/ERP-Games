@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS orders (
     payment_request_sent    INTEGER DEFAULT 0,
     production_notified     INTEGER DEFAULT 0,
     produced_at             DATETIME,
+    customer_rating         INTEGER,
     created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at              DATETIME DEFAULT CURRENT_TIMESTAMP
 );

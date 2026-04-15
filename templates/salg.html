@@ -360,4 +360,15 @@ document.querySelectorAll('.rating-radio').forEach(function(radio) {
   setInterval(updateDeadlines, 30000);
 })();
 </script>
+
+{# ── 5. Registrer kundetilfredshed ───────────────────────── #}
+<div class="section-block">
+  <div class="section-head">
+    <h2>Registrer kundetilfredshed</h2>
+  </div>
+  <p style="padding:.75rem 1.4rem 1.25rem; color:var(--text-muted); font-size:.88rem;">
+    Gå til <a href="{{ url_for('kundetilfredshed') }}">Kundetilfredshedsrapporten</a> for at registrere kunderatings og se den fulde log.
+  </p>
+</div>
+
 {% endblock %}

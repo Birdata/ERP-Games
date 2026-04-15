@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Kundetilfredshed — LEGO ERP{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Kundetilfredshedsrapport</h1>
+  <p>Registrer og følg op på kundernes tilfredshed efter levering.</p>
+</div>
+
+{# ── Gennemsnit KPI ────────────────────────────────────────── #}
+{% if avg_rating %}
+<div class="section-block" style="margin-bottom:1.5rem;">
+  <div style="padding:1.25rem 1.4rem; display:flex; align-items:center; gap:2rem; flex-wrap:wrap;">
+    <div style="text-align:center;">
+      <div style="font-size:2.5rem; font-weight:700; color:var(--lego-yellow);">
+        {{ avg_rating }}
+        <span style="font-size:1.1rem; color:var(--text-muted);">/ 5</span>
+      </div>
+      <div style="font-size:.82rem; color:var(--text-muted); margin-top:.25rem;">Gennemsnitlig rating</div>
+    </div>
+    <div style="font-size:.9rem; color:var(--text-muted);">
+      Baseret på <strong>{{ log | length }}</strong> bedømmelse{{ 'r' if log | length != 1 else '' }}.
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# ── Afventer rating ───────────────────────────────────────── #}
+<div class="section-block">
+  <div class="section-head">
+    <h2>Afventer kunderating</h2>
+    <span class="section-count">{{ afventer_rating | length }}</span>
+  </div>
+
+  {% if afventer_rating %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Ordre-ID</th>
+        <th>Kunde</th>
+        <th>Figur</th>
+        <th>Faktureret</th>
+        <th>Rating (1–5)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in afventer_rating %}
+      <tr>
+        <td><span class="order-id">{{ o.order_id }}</span></td>
+        <td>{{ o.customer }}</td>
+        <td>{{ o.figure_id }}</td>
+        <td style="color:var(--text-muted); font-size:.82rem;">{{ o.updated_at[:16] }}</td>
+        <td>
+          <form method="POST" action="{{ url_for('kundetilfredshed_registrer', order_id=o.order_id) }}"
+                style="display:flex; gap:.5rem; align-items:center;">
+            <select name="rating" required style="width:80px;">
+              <option value="" disabled selected>—</option>
+              {% for i in [1,2,3,4,5] %}
+                <option value="{{ i }}">{{ i }} ★</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="btn btn-primary btn-sm">Gem</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="section-empty">Ingen fakturerede ordrer mangler en rating.</p>
+  {% endif %}
+</div>
+
+{# ── Log over alle ratings ─────────────────────────────────── #}
+<div class="section-block">
+  <div class="section-head">
+    <h2>Log — alle kunderatings</h2>
+    <span class="section-count">{{ log | length }}</span>
+  </div>
+
+  {% if log %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Ordre-ID</th>
+        <th>Kunde</th>
+        <th>Figur</th>
+        <th>Rating</th>
+        <th>Tidspunkt</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in log %}
+      <tr>
+        <td><span class="order-id">{{ r.order_id }}</span></td>
+        <td>{{ r.customer }}</td>
+        <td>{{ r.figure_id }}</td>
+        <td>
+          <span style="font-weight:600; font-size:1rem;">
+            {% for i in range(r.customer_rating) %}★{% endfor %}{% for i in range(5 - r.customer_rating) %}<span style="color:var(--text-muted);">★</span>{% endfor %}
+          </span>
+          <span style="margin-left:.4rem; color:var(--text-muted); font-size:.82rem;">{{ r.customer_rating }}/5</span>
+        </td>
+        <td style="color:var(--text-muted); font-size:.82rem;">{{ r.updated_at[:16] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="section-empty">Ingen kunderatings registreret endnu.</p>
+  {% endif %}
+</div>
+
+{% endblock %}
