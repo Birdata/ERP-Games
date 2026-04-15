@@ -50,14 +50,6 @@ FIGURE_LIST_PRICES: dict[str, float] = {
     "B1375A22": 61_000.0,
 }
 
-# Discount rates per customer (0.20 = 20 %)
-CUSTOMER_DISCOUNTS: dict[str, float] = {
-    "Navy Seal":   0.20,
-    "Bundeswehr":  0.20,
-    "Royal Navy":  0.10,
-    "Flyvevåbnet": 0.05,
-}
-
 # Component seed: one row per unique component per figure
 # (varenummer, quantity-used, unit_price)
 _COMPONENT_SEED: dict[str, list[tuple[str, int, float]]] = {
