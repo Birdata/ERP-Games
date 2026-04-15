@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Result — LEGO QC{% endblock %}
+
+{% block content %}
+
+{# ── Banner ─────────────────────────────────────────────── #}
+<div class="banner {{ result }}">
+  <span class="banner-icon">{% if result == 'pass' %}✓{% else %}✗{% endif %}</span>
+  <span>
+    Figure <strong>{{ figure_id }}</strong> —
+    {% if result == 'pass' %}PASS: all layers match.
+    {% else %}FAIL: {{ errors | length }} layer{{ 's' if errors | length != 1 else '' }} incorrect.
+    {% endif %}
+  </span>
+</div>
+
+{# ── Layer comparison ─────────────────────────────────────── #}
+<div class="card" style="margin-bottom:1.5rem;">
+  <h2>Layer-by-layer comparison</h2>
+
+  {% set error_layers = errors | map(attribute='layer') | list %}
+
+  <div class="layer-grid">
+    {# column headers #}
+    <div></div>
+    <div class="col-header">Expected</div>
+    <div class="col-header">Detected</div>
+
+    {% set max_len = [expected | length, detected | length] | max %}
+
+    {% for i in range(max_len) %}
+      {% set layer_num  = i + 1 %}
+      {% set exp_color  = expected[i]  if i < expected | length  else None %}
+      {% set det_color  = detected[i]  if i < detected | length  else None %}
+      {% set is_error   = layer_num in error_layers %}
+
+      <div class="layer-num">{{ layer_num }}</div>
+
+      {# Expected block #}
+      {% if exp_color %}
+        <div class="color-block {% if is_error %}mismatch{% endif %}"
+             data-color="{{ exp_color }}">{{ exp_color }}</div>
+      {% else %}
+        <div class="color-block missing" data-color="none">—</div>
+      {% endif %}
+
+      {# Detected block #}
+      {% if det_color %}
+        <div class="color-block {% if is_error %}mismatch{% endif %}"
+             data-color="{{ det_color }}">{{ det_color }}</div>
+      {% else %}
+        <div class="color-block missing" data-color="none">missing</div>
+      {% endif %}
+
+    {% endfor %}
+  </div>
+</div>
+
+{# ── Error detail ──────────────────────────────────────────── #}
+{% if errors %}
+<div class="card" style="margin-bottom:1.5rem;">
+  <h2>Errors</h2>
+  <table class="error-table">
+    <thead>
+      <tr>
+        <th>Layer</th>
+        <th>Expected</th>
+        <th>Detected</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for err in errors %}
+      <tr>
+        <td>{{ err.layer }}</td>
+        <td>
+          {% if err.expected %}
+            <span class="color-block" data-color="{{ err.expected }}"
+                  style="display:inline-flex;height:28px;padding:0 .5rem;font-size:.78rem;">
+              {{ err.expected }}
+            </span>
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          {% if err.detected %}
+            <span class="color-block" data-color="{{ err.detected }}"
+                  style="display:inline-flex;height:28px;padding:0 .5rem;font-size:.78rem;">
+              {{ err.detected }}
+            </span>
+          {% else %}<em style="color:var(--text-muted)">missing</em>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{# ── Action ────────────────────────────────────────────────── #}
+<a href="{{ url_for('index') }}" class="btn btn-secondary">← Inspect another figure</a>
+
+{% endblock %}

@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Produktion — LEGO ERP{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Produktion</h1>
+  <p>Hentning af klodser og montering af LEGO-figurer.</p>
+</div>
+
+{# ── 1. Klar til afhentning hos logistik ─────────────────── #}
+<div class="section-block">
+  <div class="section-head">
+    <h2>Klar til afhentning hos logistik</h2>
+    <span class="section-count">{{ klar | length }}</span>
+  </div>
+
+  {% if klar %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Ordre-ID</th>
+        <th>Kunde</th>
+        <th>Figur</th>
+        <th>Klar siden</th>
+        <th>Status</th>
+        <th>Handling</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in klar %}
+      <tr>
+        <td><span class="order-id">{{ o.order_id }}</span></td>
+        <td>{{ o.customer }}</td>
+        <td>{{ o.figure_id }}</td>
+        <td style="color:var(--text-muted);font-size:.82rem;">{{ o.updated_at[:16] }}</td>
+        <td>
+          {% if o.prod_pickup_requested %}
+            <span class="pill pill-klar_til_produktion">Afventer logistik</span>
+          {% else %}
+            <span class="pill pill-klar_til_produktion">Klar til afhentning</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if not o.prod_pickup_requested %}
+          <form method="POST" action="{{ url_for('produktion_hent', order_id=o.order_id) }}" style="display:inline;">
+            <button class="btn btn-primary btn-sm">Hent klodser hos logistik</button>
+          </form>
+          {% else %}
+            <div class="confirm-card" style="margin:0; display:inline-flex; padding:.5rem .85rem;">
+              <p style="margin:0; font-size:.8rem;">Venter på logistiks bekræftelse…</p>
+            </div>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="section-empty">Ingen ordrer venter på klodser.</p>
+  {% endif %}
+</div>
+
+{# ── 2. I produktion ─────────────────────────────────────── #}
+<div class="section-block">
+  <div class="section-head">
+    <h2>I produktion</h2>
+    <span class="section-count">{{ i_prod | length }}</span>
+  </div>
+
+  {% if i_prod %}
+  <div style="display:flex; flex-direction:column; gap:1rem; padding:1rem 1.4rem;">
+    {% for o in i_prod %}
+    {% set seq = sequences.get(o.figure_id, []) %}
+    <div class="card" style="display:flex; align-items:flex-start; gap:1.5rem; flex-wrap:wrap;">
+
+      {# Order info #}
+      <div style="min-width:160px;">
+        <div class="order-id" style="margin-bottom:.3rem;">{{ o.order_id }}</div>
+        <div style="font-size:.82rem; color:var(--text-muted);">{{ o.customer }}</div>
+        <div style="font-size:.82rem; color:var(--text-muted);">{{ o.figure_id }}</div>
+        <div style="font-size:.75rem; color:var(--text-muted); margin-top:.25rem;">{{ o.updated_at[:16] }}</div>
+      </div>
+
+      {# Build sequence — top to bottom #}
+      <div style="flex:1; min-width:200px;">
+        <div style="font-size:.75rem; font-weight:600; text-transform:uppercase;
+                    letter-spacing:.06em; color:var(--text-muted); margin-bottom:.5rem;">
+          Byggerækkefølge (top → bund)
+        </div>
+        <div style="display:flex; flex-direction:column; gap:.3rem;">
+          {% for colour in seq %}
+          <div style="display:flex; align-items:center; gap:.6rem;">
+            <span style="font-size:.72rem; color:var(--text-muted); width:1.4rem; text-align:right;">{{ loop.index }}</span>
+            <div class="color-block" data-color="{{ colour }}"
+                 style="padding:.25rem .75rem; font-size:.8rem; border-radius:4px; min-width:90px;">
+              {{ colour }}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      {# Action #}
+      <div style="display:flex; align-items:center;">
+        <form method="POST" action="{{ url_for('produktion_faerdig', order_id=o.order_id) }}">
+          <button class="btn btn-success btn-sm">Produktion færdig — send til QC</button>
+        </form>
+      </div>
+
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+    <p class="section-empty">Ingen ordrer er i produktion lige nu.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

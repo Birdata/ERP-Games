@@ -1,0 +1,313 @@
+{% extends "base.html" %}
+{% block title %}Manuel Tjek — LEGO QC{% endblock %}
+
+{% block content %}
+
+<script>
+const REFERENCES = {{ references | tojson }};
+const CSS_COLORS = {
+  blue:"#0055BF", yellow:"#FFD700", green:"#237841",
+  white:"#F4F4F4", red:"#C91A09", orange:"#FE8A18", purple:"#5F2683"
+};
+const TEXT_COLORS = {
+  blue:"#fff", yellow:"#1a1a1a", green:"#fff",
+  white:"#444", red:"#fff", orange:"#1a1a1a", purple:"#fff"
+};
+const GLOW = {
+  blue:"0,85,191", yellow:"255,215,0", green:"35,120,65",
+  white:"200,200,200", red:"201,26,9", orange:"254,138,24", purple:"95,38,131"
+};
+const LABELS = {
+  blue:"Blå", yellow:"Gul", green:"Grøn",
+  white:"Hvid", red:"Rød", orange:"Orange", purple:"Lilla"
+};
+const ALL_COLORS = ["blue","yellow","green","white","red","orange","purple"];
+</script>
+
+<div class="manual-header">
+  <h1>Manuel farvetjek</h1>
+  <p>Klik farver i rækkefølge — klik et lag igen for at fjerne det.</p>
+</div>
+
+<form method="POST" action="{{ url_for('manual_check') }}" id="manual-form">
+  <input type="hidden" name="figure_id" id="hidden-figure-id">
+
+  {# ── Controls row ──────────────────────────────────────── #}
+  <div class="mc-controls card">
+    <div class="mc-select-wrap">
+      <label for="figure_sel">Figur</label>
+      <select id="figure_sel" required onchange="onFigureChange(this.value)">
+        <option value="" disabled selected>— vælg figur —</option>
+        {% for fig in figures %}
+          <option value="{{ fig }}">{{ fig }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="mc-count-wrap">
+      <label>Lag</label>
+      <div class="count-row">
+        <button type="button" class="count-btn" onclick="adjustLayers(-1)">−</button>
+        <span id="layer-count-display">0</span>
+        <button type="button" class="count-btn" onclick="adjustLayers(1)">+</button>
+      </div>
+    </div>
+
+    <div class="mc-progress-wrap" id="progress-wrap" style="display:none;">
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" id="progress-fill"></div>
+      </div>
+      <span class="progress-label" id="progress-label">0 / 0</span>
+    </div>
+  </div>
+
+  {# ── Build stage ───────────────────────────────────────── #}
+  <div class="build-stage" id="build-stage">
+    <div class="stage-empty" id="stage-empty">
+      Vælg en figur herover
+    </div>
+    <div id="brick-column" class="stage-bricks"></div>
+  </div>
+
+  {# ── Palette strip ─────────────────────────────────────── #}
+  <div class="palette-strip" id="palette-strip">
+    {% for c in ["blue","yellow","green","white","red","orange","purple"] %}
+    <div class="pal-chip" id="chip-{{ c }}" data-color="{{ c }}"
+         onclick="paletteClick('{{ c }}')"
+         draggable="true"
+         ondragstart="onPaletteDragStart(event,'{{ c }}')"
+         ondragend="onDragEnd(event)">
+      <div class="pal-studs">
+        <span class="pal-stud"></span>
+        <span class="pal-stud"></span>
+      </div>
+      <div class="pal-body" style="background:{{ loop.index }}" data-color="{{ c }}">
+        <span class="pal-label">
+          {{ {"blue":"Blå","yellow":"Gul","green":"Grøn","white":"Hvid",
+              "red":"Rød","orange":"Orange","purple":"Lilla"}[c] }}
+        </span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div id="hidden-inputs"></div>
+
+  <div class="mc-footer">
+    <button type="submit" class="btn btn-primary btn-check" id="check-btn" disabled>
+      Tjek rækkefølge
+    </button>
+    <span class="fill-hint" id="fill-hint"></span>
+  </div>
+
+</form>
+
+<script>
+// ── State ─────────────────────────────────────────────────
+let layerColors = [];
+let layerCount  = 0;
+let dragSource  = null;
+
+// ── Palette colour init ────────────────────────────────────
+// Set actual CSS colors on pal-body elements
+document.querySelectorAll('.pal-body[data-color]').forEach(el => {
+  const c = el.dataset.color;
+  el.style.background = CSS_COLORS[c];
+  el.style.color = TEXT_COLORS[c];
+  el.style.boxShadow = `inset 0 -5px 0 rgba(0,0,0,.25), 0 0 12px rgba(${GLOW[c]},.0)`;
+});
+document.querySelectorAll('.pal-chip').forEach(el => {
+  const c = el.dataset.color;
+  el.querySelectorAll('.pal-stud').forEach(s => s.style.background = CSS_COLORS[c]);
+});
+
+// ── Palette click → fill next empty layer ─────────────────
+function paletteClick(color) {
+  const next = layerColors.indexOf(null);
+  if (next === -1) return;
+  layerColors[next] = color;
+  renderBricks();
+  animatePaletteChip(color);
+}
+
+function animatePaletteChip(color) {
+  const chip = document.getElementById(`chip-${color}`);
+  chip.classList.remove('chip-pop');
+  void chip.offsetWidth;
+  chip.classList.add('chip-pop');
+}
+
+// ── Figure / layer management ──────────────────────────────
+function onFigureChange(figId) {
+  document.getElementById('hidden-figure-id').value = figId;
+  if (!figId || !REFERENCES[figId]) return;
+  setLayerCount(REFERENCES[figId].length);
+}
+
+function adjustLayers(delta) {
+  const n = layerCount + delta;
+  if (n < 1 || n > 12) return;
+  setLayerCount(n);
+}
+
+function setLayerCount(n) {
+  layerCount = n;
+  layerColors = Array.from({length: n}, (_, i) => layerColors[i] ?? null);
+  document.getElementById('layer-count-display').textContent = n;
+  document.getElementById('progress-wrap').style.display = 'flex';
+  document.getElementById('stage-empty').style.display = 'none';
+  renderBricks();
+}
+
+// ── Brick click → remove colour ────────────────────────────
+function clickBrick(index) {
+  layerColors[index] = null;
+  renderBricks();
+}
+
+// ── Drag from palette ──────────────────────────────────────
+function onPaletteDragStart(e, color) {
+  dragSource = { type: 'palette', color };
+  e.dataTransfer.effectAllowed = 'copy';
+  e.dataTransfer.setData('text/plain', color);
+  const g = ghost(color); document.body.appendChild(g);
+  e.dataTransfer.setDragImage(g, 60, 20);
+  requestAnimationFrame(() => g.remove());
+}
+
+// ── Drag from brick ────────────────────────────────────────
+function onBrickDragStart(e, i) {
+  const color = layerColors[i];
+  if (!color) { e.preventDefault(); return; }
+  dragSource = { type: 'brick', color, index: i };
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', color);
+  const g = ghost(color); document.body.appendChild(g);
+  e.dataTransfer.setDragImage(g, 60, 20);
+  requestAnimationFrame(() => g.remove());
+  e.currentTarget.style.opacity = '.35';
+}
+
+function onBrickDragOver(e, i) {
+  e.preventDefault();
+  document.querySelectorAll('.stage-brick').forEach((el, idx) =>
+    el.classList.toggle('drag-over', idx === i)
+  );
+}
+
+function onBrickDragLeave(e) {
+  if (!e.currentTarget.contains(e.relatedTarget))
+    e.currentTarget.classList.remove('drag-over');
+}
+
+function onBrickDrop(e, ti) {
+  e.preventDefault();
+  document.querySelectorAll('.stage-brick').forEach(el => el.classList.remove('drag-over'));
+  if (!dragSource) return;
+  if (dragSource.type === 'palette') {
+    layerColors[ti] = dragSource.color;
+  } else {
+    const si = dragSource.index;
+    [layerColors[ti], layerColors[si]] = [dragSource.color, layerColors[ti]];
+  }
+  dragSource = null;
+  renderBricks();
+}
+
+function onDragEnd(e) {
+  dragSource = null;
+  document.querySelectorAll('.stage-brick').forEach(el => {
+    el.style.opacity = '';
+    el.classList.remove('drag-over');
+  });
+}
+
+function ghost(color) {
+  const el = document.createElement('div');
+  el.style.cssText = `position:fixed;top:-200px;left:-200px;width:120px;height:32px;
+    background:${CSS_COLORS[color]};color:${TEXT_COLORS[color]};border-radius:5px;
+    display:flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:700;
+    box-shadow:0 0 14px rgba(${GLOW[color]},.6);font-family:inherit;pointer-events:none;`;
+  el.textContent = LABELS[color];
+  return el;
+}
+
+// ── Render ─────────────────────────────────────────────────
+function renderBricks() {
+  const col = document.getElementById('brick-column');
+  const nextEmpty = layerColors.indexOf(null);
+
+  col.innerHTML = layerColors.map((color, i) => {
+    const isNext    = i === nextEmpty;
+    const hasColor  = !!color;
+    const glow      = hasColor
+      ? `inset 0 -5px 0 rgba(0,0,0,.28), inset 0 2px 0 rgba(255,255,255,.12), 0 0 22px rgba(${GLOW[color]},.38)`
+      : '';
+    const bodyStyle = hasColor
+      ? `background:${CSS_COLORS[color]};color:${TEXT_COLORS[color]};box-shadow:${glow};border-color:transparent;`
+      : '';
+    const studStyle = hasColor ? `background:${CSS_COLORS[color]};filter:brightness(1.25);` : '';
+    const cls = [
+      'stage-brick',
+      !hasColor ? 'empty' : '',
+      isNext    ? 'next'  : '',
+    ].filter(Boolean).join(' ');
+
+    return `<div class="${cls}"
+         draggable="${hasColor}"
+         onclick="clickBrick(${i})"
+         ondragstart="onBrickDragStart(event,${i})"
+         ondragover="onBrickDragOver(event,${i})"
+         ondragleave="onBrickDragLeave(event)"
+         ondrop="onBrickDrop(event,${i})"
+         ondragend="onDragEnd(event)">
+      <div class="sb-studs">
+        <span class="sb-stud" style="${studStyle}"></span>
+        <span class="sb-stud" style="${studStyle}"></span>
+        <span class="sb-stud" style="${studStyle}"></span>
+        <span class="sb-stud" style="${studStyle}"></span>
+      </div>
+      <div class="sb-body" style="${bodyStyle}">
+        <span class="sb-num">${i + 1}</span>
+        <span class="sb-label">${hasColor ? LABELS[color] : (isNext ? '← klik en farve' : '')}</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Animate newly placed bricks
+  col.querySelectorAll('.stage-brick:not(.empty)').forEach(el => {
+    if (!el.dataset.animated) {
+      el.dataset.animated = '1';
+      el.classList.add('brick-in');
+      el.addEventListener('animationend', () => el.classList.remove('brick-in'), { once: true });
+    }
+  });
+
+  syncInputs();
+  updateProgress();
+  updateSubmit();
+}
+
+function syncInputs() {
+  document.getElementById('hidden-inputs').innerHTML =
+    layerColors.map((c, i) =>
+      `<input type="hidden" name="layer_${i}" value="${c ?? ''}">`).join('');
+}
+
+function updateProgress() {
+  const filled = layerColors.filter(Boolean).length;
+  const pct    = layerCount ? (filled / layerCount) * 100 : 0;
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-label').textContent = `${filled} / ${layerCount}`;
+}
+
+function updateSubmit() {
+  const filled  = layerCount > 0 && layerColors.every(Boolean);
+  const missing = layerColors.filter(c => !c).length;
+  document.getElementById('check-btn').disabled = !filled;
+  document.getElementById('fill-hint').textContent =
+    (!filled && layerCount > 0) ? `${missing} lag mangler` : '';
+}
+</script>
+
+{% endblock %}

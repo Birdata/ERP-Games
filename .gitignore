@@ -1,0 +1,28 @@
+# Database
+*.db
+erp.db
+qc_log.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Reference images (local camera calibration — not committed)
+static/refs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

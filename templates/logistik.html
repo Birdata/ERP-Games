@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% block title %}Logistik — LEGO ERP{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Logistik</h1>
+  <p>Indkøbsordrer, modtagelse, lager og leveringer.</p>
+</div>
+
+{# ── 1. Kunde-godkendte ordrer → send til indkøb ─────────── #}
+<div class="section-block">
+  <div class="section-head">
+    <h2>Opret indkøbsordre</h2>
+    <span class="section-count">{{ kunde_godkendt | length }}</span>
+  </div>
+
+  {% if kunde_godkendt %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Ordre-ID</th>
+        <th>Kunde</th>
+        <th>Figur</th>
+        <th>Est. pris</th>
+        <th>Handling</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in kunde_godkendt %}
+      <tr>
+        <td><span class="order-id">{{ o.order_id }}</span></td>
+        <td>{{ o.customer }}</td>
+        <td>{{ o.figure_id }}</td>
+        <td class="amount">{{ "{:,.0f}".format(o.estimated_cost or 0) }} kr</td>
+        <td>
+          <form method="POST" action="{{ url_for('logistik_send_indkoeb', order_id=o.order_id) }}" style="display:inline;">
+            <button class="btn btn-primary btn-sm">Send til indkøb</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="section-empty">Ingen godkendte ordrer afventer indkøbsordre.</p>
+  {% endif %}
+</div>
+
+{# ── 2. Klodser hentet → opgave A (betaling) + B (produktion) #}
+<div class="section-block">
+  <div class="section-head">
+    <h2>Modtagelse — betalingsanmodning &amp; produktion</h2>
+    <span class="section-count">{{ klodser_hentet | length }}</span>
+  </div>
+
+  {% if klodser_hentet %}
+    {% for o in klodser_hentet %}
+    <div style="border-bottom:1px solid var(--border); padding:1.25rem 1.4rem;">
+      <div style="display:flex; align-items:center; gap:1rem; margin-bottom:1rem; flex-wrap:wrap;">
+        <span class="order-id">{{ o.order_id }}</span>
+        <span>{{ o.customer }}</span>
+        <span style="color:var(--text-muted);">{{ o.figure_id }}</span>
+        <span class="pill pill-klodser_hentet">Klodser hentet</span>
+        {% if o.payment_request_sent %}
+          <span class="badge pass" title="Opgave A fuldført">A ✓</span>
+        {% else %}
+          <span class="badge fail" title="Opgave A mangler">A ✗</span>
+        {% endif %}
+        {% if o.production_notified %}
+          <span class="badge pass" title="Opgave B fuldført">B ✓</span>
+        {% else %}
+          <span class="badge fail" title="Opgave B mangler">B ✗</span>
+        {% endif %}
+      </div>
+
+      {# Component list #}
+      {% if components.get(o.order_id) %}
+      <details style="margin-bottom:.9rem;">
+        <summary style="cursor:pointer; font-size:.82rem; color:var(--text-muted); user-select:none;">
+          Vis komponentliste
+        </summary>
+        <div style="margin-top:.6rem;">
+          <table class="comp-table">
+            <thead><tr><th>Komponent</th><th>Antal</th><th>Enhedspris</th><th>Subtotal</th></tr></thead>
+            <tbody>
+              {% set ns = namespace(total=0) %}
+              {% for c in components[o.order_id] %}
+              {% set sub = c.quantity * c.unit_price %}
+              {% set ns.total = ns.total + sub %}
+              <tr>
+                <td>{{ c.component }}</td>
+                <td>{{ c.quantity }}</td>
+                <td>{{ "{:,.2f}".format(c.unit_price) }} kr</td>
+                <td class="amount">{{ "{:,.2f}".format(sub) }} kr</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <div class="comp-total">Total: {{ "{:,.0f}".format(ns.total) }} kr</div>
+        </div>
+      </details>
+      {% endif %}
+
+      <div class="two-col" style="gap:1rem;">
+
+        {# Opgave A — Betalingsanmodning #}
+        <div>
+          <h3>Opgave A — Betalingsanmodning til økonomi</h3>
+          {% if o.payment_request_sent %}
+            <p style="color:var(--success); font-weight:600; margin:0;">Betalingsanmodning allerede sendt ✓</p>
+          {% else %}
+          <form method="POST" action="{{ url_for('logistik_send_payment_request', order_id=o.order_id) }}" class="inline-form">
+            <div class="form-group">
+              <label>Leverandørnavn</label>
+              <input type="text" name="supplier" placeholder="Leverandørnavn" required />
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Beløb (kr)</label>
+                <input type="number" name="amount" step="0.01" min="0"
+                       value="{{ o.actual_cost or o.estimated_cost or '' }}" required />
+              </div>
+              <div class="form-group">
+                <label>Fakturanr.</label>
+                <input type="text" name="invoice_ref" placeholder="INV-0001" />
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm">Send betalingsanmodning</button>
+          </form>
+          {% endif %}
+        </div>
+
+        {# Opgave B — Notificér produktion #}
+        <div>
+          <h3>Opgave B — Notificér produktion</h3>
+          {% if o.production_notified %}
+            <p style="color:var(--success); font-weight:600; margin:0;">Produktion allerede notificeret ✓</p>
+          {% else %}
+          <p style="font-size:.84rem;">Bekræft at klodserne er klar til afhentning hos Produktion.</p>
+          <form method="POST" action="{{ url_for('logistik_notificer_prod', order_id=o.order_id) }}">
+            <button class="btn btn-warning btn-sm">Notificér produktion — klodser klar</button>
+          </form>
+          {% endif %}
+        </div>
+
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="section-empty">Ingen ordrer afventer modtagelse.</p>
+  {% endif %}
+</div>
+
+{# ── 3. Bekræft aflevering til produktion ────────────────── #}
+{% if pending_prod_confirm %}
+<div class="section-block">
+  <div class="section-head">
+    <h2>Bekræft aflevering til produktion</h2>
+    <span class="section-count">{{ pending_prod_confirm | length }}</span>
+  </div>
+  {% for o in pending_prod_confirm %}
+  <div class="confirm-card" style="margin:.75rem 1.4rem;">
+    <p>
+      <strong>{{ o.order_id }}</strong> — {{ o.customer }} ({{ o.figure_id }})<br>
+      Produktion har anmodet om klodser. Bekræft fysisk aflevering.
+    </p>
+    <form method="POST" action="{{ url_for('logistik_bekraeft_prod', order_id=o.order_id) }}">
+      <button class="btn btn-warning btn-sm">Bekræft aflevering</button>
+    </form>
+  </div>
+  {% endfor %}
+  <div style="height:.75rem;"></div>
+</div>
+{% endif %}
+
+{# ── 4. Færdigvarelager ───────────────────────────────────── #}
+<div class="section-block">
+  <div class="section-head">
+    <h2>Færdigvarelager</h2>
+    <span class="section-count">{{ paa_lager | length }}</span>
+  </div>
+
+  {% if paa_lager %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Ordre-ID</th>
+        <th>Kunde</th>
+        <th>Figur</th>
+        <th>Holdeplads</th>
+        <th>Handling</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in paa_lager %}
+      <tr>
+        <td><span class="order-id">{{ o.order_id }}</span></td>
+        <td>{{ o.customer }}</td>
+        <td>{{ o.figure_id }}</td>
+        <td><strong>{{ o.holdeplads or '—' }}</strong></td>
+        <td>
+          <form method="POST" action="{{ url_for('logistik_notificer_salg', order_id=o.order_id) }}"
+                style="display:flex; gap:.5rem; align-items:center; flex-wrap:wrap;">
+            <input type="text" name="holdeplads" placeholder="{{ o.holdeplads or 'Holdeplads' }}"
+                   style="width:90px; padding:.35rem .6rem; border:1.5px solid var(--border); border-radius:var(--radius); font-size:.82rem;" />
+            <button class="btn btn-success btn-sm">Notificér salg</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="section-empty">Ingen varer på lager.</p>
+  {% endif %}
+</div>
+
+{# ── 5. Bekræft afhentning af salg ───────────────────────── #}
+{% if pending_salg_confirm %}
+<div class="section-block">
+  <div class="section-head">
+    <h2>Bekræft afhentning (salg)</h2>
+    <span class="section-count">{{ pending_salg_confirm | length }}</span>
+  </div>
+  {% for o in pending_salg_confirm %}
+  <div class="confirm-card" style="margin:.75rem 1.4rem;">
+    <p>
+      <strong>{{ o.order_id }}</strong> — {{ o.customer }} — holdeplads: <strong>{{ o.holdeplads }}</strong><br>
+      Salg har registreret afhentning. Bekræft at varen er udleveret.
+    </p>
+    <form method="POST" action="{{ url_for('logistik_bekraeft_salg', order_id=o.order_id) }}">
+      <button class="btn btn-warning btn-sm">Bekræft udlevering</button>
+    </form>
+  </div>
+  {% endfor %}
+  <div style="height:.75rem;"></div>
+</div>
+{% endif %}
+
+{% endblock %}

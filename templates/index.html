@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Inspect — LEGO QC{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Kamerainspektion</h1>
+  <p style="margin:0;">Hold figuren op foran kameraet, vælg figur-ID og tryk Capture.</p>
+</div>
+
+<div class="inspect-layout">
+
+  {# ── Live camera feed ───────────────────────────────────── #}
+  <div class="camera-card card">
+    <div class="camera-wrap">
+      <img id="feed"
+           src="{{ url_for('video_feed') }}"
+           alt="Live camera feed"
+           onerror="this.src=''; document.getElementById('feed-error').style.display='block'; this.style.display='none';" />
+      <div class="guide-box">
+        <span class="guide-label">Hold figuren her</span>
+      </div>
+      <div id="feed-error" class="feed-error" style="display:none;">
+        Camera not available — check connection.
+      </div>
+    </div>
+  </div>
+
+  {# ── Controls ───────────────────────────────────────────── #}
+  <div class="controls-card card">
+    <form method="POST" action="{{ url_for('inspect') }}">
+
+      <div class="form-group">
+        <label for="figure_id">Figure ID</label>
+        <select id="figure_id" name="figure_id" required>
+          <option value="" disabled selected>— choose figure —</option>
+          {% for fig in figures %}
+            <option value="{{ fig }}">{{ fig }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-capture">
+        Capture &amp; Inspect
+      </button>
+
+    </form>
+
+    <div class="hint">
+      The camera captures one frame when you press the button.<br>
+      Make sure the figure is centred and fully visible.
+    </div>
+  </div>
+
+</div>
+{% endblock %}

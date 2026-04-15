@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Historik — LEGO ERP{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Ordrehistorik</h1>
+  <p>Komplet log over alle ordrer i systemet.</p>
+</div>
+
+<div class="section-block">
+  <div class="section-head">
+    <h2>Alle ordrer</h2>
+    <span class="section-count">{{ orders | length }} total</span>
+  </div>
+
+  {% if orders %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Ordre-ID</th>
+        <th>Kunde</th>
+        <th>Figur</th>
+        <th>Status</th>
+        <th>Holdeplads</th>
+        <th>Est. pris</th>
+        <th>Faktisk pris</th>
+        <th>QC</th>
+        <th>Oprettet</th>
+        <th>Opdateret</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in orders %}
+      <tr>
+        <td><span class="order-id">{{ o.order_id }}</span></td>
+        <td>{{ o.customer }}</td>
+        <td>{{ o.figure_id }}</td>
+        <td>
+          <span class="pill pill-{{ o.status }}">
+            {{ status_labels.get(o.status, o.status) }}
+          </span>
+        </td>
+        <td style="color:var(--text-muted); font-size:.82rem;">
+          {{ o.holdeplads or '—' }}
+        </td>
+        <td class="amount" style="font-size:.82rem;">
+          {{ "{:,.0f}".format(o.estimated_cost) if o.estimated_cost else '—' }}
+        </td>
+        <td class="amount" style="font-size:.82rem;">
+          {{ "{:,.0f}".format(o.actual_cost) if o.actual_cost else '—' }}
+        </td>
+        <td>
+          {% if o.qc_result %}
+            <span class="badge {{ o.qc_result }}">{{ o.qc_result }}</span>
+          {% else %}
+            <span style="color:var(--text-muted); font-size:.8rem;">—</span>
+          {% endif %}
+        </td>
+        <td style="color:var(--text-muted); font-size:.78rem; white-space:nowrap;">
+          {{ o.created_at[:16] if o.created_at else '—' }}
+        </td>
+        <td style="color:var(--text-muted); font-size:.78rem; white-space:nowrap;">
+          {{ o.updated_at[:16] if o.updated_at else '—' }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="section-empty">Ingen ordrer er oprettet endnu.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

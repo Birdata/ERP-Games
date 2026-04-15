@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — LEGO ERP{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Dashboard</h1>
+  <p>Overblik over alle aktive ordrer i systemet.</p>
+</div>
+
+{# ── KPI Cards ──────────────────────────────────────────────── #}
+<div class="kpi-grid" id="kpi-grid">
+
+  <div class="kpi-card kpi-active">
+    <div class="kpi-label">Aktive ordrer</div>
+    <div class="kpi-value" id="kpi-active">—</div>
+    <div class="kpi-sub">I flow just nu</div>
+  </div>
+
+  <div class="kpi-card kpi-pending">
+    <div class="kpi-label">Afventer godkendelse</div>
+    <div class="kpi-value" id="kpi-pending">—</div>
+    <div class="kpi-sub">Kapital eller kunde</div>
+  </div>
+
+  <div class="kpi-card kpi-stock">
+    <div class="kpi-label">På lager</div>
+    <div class="kpi-value" id="kpi-stock">—</div>
+    <div class="kpi-sub">Klar til forsendelse</div>
+  </div>
+
+  <div class="kpi-card kpi-produced">
+    <div class="kpi-label">Produceret i dag</div>
+    <div class="kpi-value" id="kpi-produced">—</div>
+    <div class="kpi-sub">Sendt til QC i dag</div>
+  </div>
+
+  <div class="kpi-card kpi-revenue">
+    <div class="kpi-label">Dagens omsætning</div>
+    <div class="kpi-value" id="kpi-revenue">—</div>
+    <div class="kpi-sub">Faktureret i dag</div>
+  </div>
+
+</div>
+
+{# ── Orders Table ───────────────────────────────────────────── #}
+<div class="section-block">
+  <div class="section-head">
+    <h2>Alle ordrer</h2>
+    <span class="section-count">{{ orders | length }} total</span>
+  </div>
+
+  {% if orders %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Ordre-ID</th>
+        <th>Kunde</th>
+        <th>Figur</th>
+        <th>Nuværende trin</th>
+        <th>Afdeling</th>
+        <th>Opdateret</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set dept_map = {
+        'ny_ordre':            'Salg',
+        'oekonomi_check':      'Økonomi',
+        'pending_kapital':     'Økonomi',
+        'kapital_ok':          'Salg',
+        'pending_kunde':       'Salg',
+        'kunde_godkendt':      'Logistik',
+        'indkoeb_afventer':    'Indkøb',
+        'klodser_hentet':      'Logistik',
+        'klar_til_produktion': 'Produktion',
+        'i_produktion':        'Produktion',
+        'klar_til_qc':         'S&K',
+        'paa_lager':           'Logistik',
+        'klar_til_afhentning': 'Salg',
+        'afhentet':            'Salg',
+        'faktureret':          'Økonomi',
+        'afvist':              '—',
+      } %}
+      {% for o in orders %}
+      <tr>
+        <td><span class="order-id">{{ o.order_id }}</span></td>
+        <td>{{ o.customer }}</td>
+        <td>{{ o.figure_id }}</td>
+        <td>
+          <span class="pill pill-{{ o.status }}">
+            {{ status_labels.get(o.status, o.status) }}
+          </span>
+        </td>
+        <td style="color:var(--text-muted); font-size:.82rem;">
+          {{ dept_map.get(o.status, '—') }}
+        </td>
+        <td style="color:var(--text-muted); font-size:.82rem; white-space:nowrap;">
+          {{ o.updated_at[:16] if o.updated_at else '—' }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="section-empty">Ingen ordrer endnu — opret en ny ordre under Salg.</p>
+  {% endif %}
+</div>
+
+<script>
+(function () {
+  function fmt(n) {
+    return n === null || n === undefined ? '—' : String(n);
+  }
+  function fmtKr(n) {
+    if (n === null || n === undefined) return '—';
+    return new Intl.NumberFormat('da-DK', {
+      style: 'currency', currency: 'DKK', maximumFractionDigits: 0
+    }).format(n);
+  }
+  function loadKPIs() {
+    fetch('/api/kpis')
+      .then(r => r.json())
+      .then(d => {
+        document.getElementById('kpi-active').textContent   = fmt(d.active_orders);
+        document.getElementById('kpi-pending').textContent  = fmt(d.pending_approval);
+        document.getElementById('kpi-stock').textContent    = fmt(d.paa_lager);
+        document.getElementById('kpi-produced').textContent = fmt(d.produced_today);
+        document.getElementById('kpi-revenue').textContent  = fmtKr(d.todays_revenue);
+      })
+      .catch(() => {});
+  }
+  loadKPIs();
+  setInterval(loadKPIs, 15000);
+})();
+</script>
+{% endblock %}

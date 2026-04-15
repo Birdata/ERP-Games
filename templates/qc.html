@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title %}Sikkerhed &amp; Kvalitet — LEGO ERP{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Sikkerhed &amp; Kvalitet</h1>
+  <p>Kamera-baseret inspektion af færdige LEGO-figurer.</p>
+</div>
+
+{# ── Result from last inspection ─────────────────────────── #}
+{% if last_result %}
+{% set r = last_result %}
+<div class="banner {{ r.result }}" style="margin-bottom:1.5rem;">
+  <span class="banner-icon">{{ '✓' if r.result == 'pass' else '✗' }}</span>
+  <span>
+    <strong>{{ 'GODKENDT' if r.result == 'pass' else 'FEJL' }}</strong>
+    — {{ r.order_id }} ({{ r.figure_id }})
+    {% if r.result == 'pass' %}
+      — alle {{ r.expected | length }} lag korrekte
+    {% else %}
+      — {{ r.errors | length }} lag afviger
+    {% endif %}
+  </span>
+</div>
+
+<div class="two-col" style="margin-bottom:1.75rem;">
+  {# Layer comparison #}
+  <div class="card">
+    <h2 style="margin-bottom:1rem;">Lag-sammenligning</h2>
+    <div class="layer-grid">
+      <div></div>
+      <div class="col-header">Forventet</div>
+      <div class="col-header">Detekteret</div>
+
+      {% for i in range([r.detected|length, r.expected|length] | max) %}
+        {% set exp = r.expected[i] if i < r.expected|length else None %}
+        {% set det = r.detected[i] if i < r.detected|length else None %}
+        {% set is_err = (det != exp) %}
+
+        <div class="layer-num">{{ i + 1 }}</div>
+
+        <div class="color-block {{ 'mismatch' if is_err else '' }}"
+             data-color="{{ exp or 'unknown' }}">
+          {{ exp or '—' }}
+        </div>
+
+        <div class="color-block {{ 'mismatch' if is_err else '' }} {{ 'missing' if not det else '' }}"
+             data-color="{{ det or 'unknown' }}">
+          {{ det or 'mangler' }}
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# Decision #}
+  <div class="card" style="display:flex; flex-direction:column; gap:.75rem; justify-content:center;">
+    <h2>Beslutning</h2>
+    <p style="font-size:.9rem; margin-bottom:.25rem;">
+      {% if r.result == 'pass' %}
+        Figuren har bestået alle lagkontroller og er klar til lager.
+      {% else %}
+        Figuren har fejl. Returner til produktion, eller godkend manuelt ved tvivl.
+      {% endif %}
+    </p>
+
+    {# Primary action based on result #}
+    {% if r.result == 'pass' %}
+    <form method="POST" action="{{ url_for('qc_godkend', order_id=r.order_id) }}">
+      <button class="btn btn-success btn-block">Send til lager</button>
+    </form>
+    <form method="POST" action="{{ url_for('qc_afvis', order_id=r.order_id) }}">
+      <button class="btn btn-secondary btn-block">Retur til produktion</button>
+    </form>
+    {% else %}
+    <form method="POST" action="{{ url_for('qc_afvis', order_id=r.order_id) }}">
+      <button class="btn btn-danger btn-block">Retur til produktion</button>
+    </form>
+    {# Manual override — always available regardless of CV result #}
+    <div style="border-top:1px solid var(--border); padding-top:.75rem; margin-top:.25rem;">
+      <p style="font-size:.75rem; color:var(--text-muted); margin-bottom:.5rem;">
+        Manuel tilsidesættelse — kun ved begrundet tvivl om kameraresultatet.
+      </p>
+      <form method="POST" action="{{ url_for('qc_godkend_manuel', order_id=r.order_id) }}">
+        <button class="btn btn-warning btn-block">Godkend manuelt (override)</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{# ── Orders awaiting QC ──────────────────────────────────── #}
+<div class="section-block">
+  <div class="section-head">
+    <h2>Ordrer klar til inspektion</h2>
+    <span class="section-count">{{ orders_klar | length }}</span>
+  </div>
+
+  {% if orders_klar %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Ordre-ID</th>
+        <th>Kunde</th>
+        <th>Figur</th>
+        <th>Produceret</th>
+        <th>Forrige QC</th>
+        <th>Handling</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in orders_klar %}
+      <tr>
+        <td><span class="order-id">{{ o.order_id }}</span></td>
+        <td>{{ o.customer }}</td>
+        <td>{{ o.figure_id }}</td>
+        <td style="color:var(--text-muted);font-size:.82rem;">
+          {{ o.produced_at[:16] if o.produced_at else '—' }}
+        </td>
+        <td>
+          {% if o.qc_result %}
+            <span class="badge {{ o.qc_result }}">{{ o.qc_result }}</span>
+          {% else %}
+            <span style="color:var(--text-muted);font-size:.82rem;">Ingen</span>
+          {% endif %}
+        </td>
+        <td>
+          <div class="action-group">
+            <a href="{{ url_for('qc_inspect_manual', order_id=o.order_id) }}"
+               class="btn btn-primary btn-sm">Inspicér</a>
+            <form method="POST" action="{{ url_for('qc_godkend_manuel', order_id=o.order_id) }}">
+              <button class="btn btn-warning btn-sm" title="Godkend uden inspektion">Godkend uden tjek</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="section-empty">Ingen ordrer afventer QC-inspektion.</p>
+  {% endif %}
+</div>
+
+{# ── Reference images ─────────────────────────────────────── #}
+<div class="section-block">
+  <div class="section-head">
+    <h2>Referencebilleder</h2>
+    <span class="section-count">
+      {{ ref_urls.values() | selectattr('__ne__', 'none') | list | length }}
+      / {{ figures | length }} uploadet
+    </span>
+  </div>
+
+  <div style="padding:1.25rem 1.4rem;">
+    <p style="margin-bottom:1.25rem; font-size:.875rem;">
+      Upload ét referencebillede per figur. Hold figuren i kameraguide-boksen og
+      tag et billede — systemet bruger det til at kalibrere farvedetektionen til
+      dit kamera og din belysning.
+    </p>
+
+    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:1rem;">
+      {% for fig_id in figures %}
+      <div class="card" style="padding:1rem; display:flex; flex-direction:column; gap:.75rem;">
+
+        {# Figure ID + status badge #}
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:.5rem;">
+          <span class="order-id">{{ fig_id }}</span>
+          {% if ref_urls[fig_id] %}
+            <span class="badge pass" style="font-size:.65rem;">Kalibreret</span>
+          {% else %}
+            <span class="badge fail" style="font-size:.65rem;">Mangler</span>
+          {% endif %}
+        </div>
+
+        {# Reference image preview #}
+        {% if ref_urls[fig_id] %}
+        <img src="{{ ref_urls[fig_id] }}"
+             alt="Reference {{ fig_id }}"
+             style="width:100%; border-radius:var(--radius); border:1px solid var(--border);
+                    object-fit:cover; aspect-ratio:4/3; background:#0d1520;" />
+        {% else %}
+        <div style="width:100%; aspect-ratio:4/3; background:var(--surface-2);
+                    border:1px dashed var(--border); border-radius:var(--radius);
+                    display:flex; align-items:center; justify-content:center;
+                    color:var(--text-muted); font-size:.8rem; font-style:italic;">
+          Intet billede
+        </div>
+        {% endif %}
+
+        {# Upload form #}
+        <form method="POST"
+              action="{{ url_for('qc_upload_ref', figure_id=fig_id) }}"
+              enctype="multipart/form-data"
+              style="display:flex; flex-direction:column; gap:.5rem;">
+          <input type="file" name="ref_image" accept=".jpg,.jpeg,.png,.bmp"
+                 style="font-size:.78rem;" required />
+          <button type="submit" class="btn btn-secondary btn-sm">
+            {{ 'Erstat billede' if ref_urls[fig_id] else 'Upload referencebillede' }}
+          </button>
+        </form>
+
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+{% endblock %}

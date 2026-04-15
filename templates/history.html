@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}History — LEGO QC{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Inspektionshistorik</h1>
+  <p style="margin:0;">De seneste 100 inspektioner, nyeste først.</p>
+</div>
+
+{% if rows %}
+<div class="card" style="overflow-x:auto;">
+  <table class="history-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Timestamp (UTC)</th>
+        <th>Figure</th>
+        <th>Result</th>
+        <th>Detected sequence</th>
+        <th>Expected sequence</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>{{ row['id'] }}</td>
+        <td style="white-space:nowrap;">{{ row['timestamp'] }}</td>
+        <td><strong>{{ row['figure_id'] }}</strong></td>
+        <td><span class="badge {{ row['result'] }}">{{ row['result'] }}</span></td>
+        <td>{{ row['detected'] }}</td>
+        <td>{{ row['expected'] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card">
+  <p style="margin:0;">No inspections logged yet.</p>
+</div>
+{% endif %}
+
+<div style="margin-top:1rem;">
+  <a href="{{ url_for('index') }}" class="btn btn-secondary">← Back to Inspect</a>
+</div>
+{% endblock %}

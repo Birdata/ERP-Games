@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Inspektion — {{ order_id }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Inspektion</h1>
+  <p>{{ order_id }} &mdash; {{ figure_id }}</p>
+</div>
+
+<div class="section-block">
+  <div style="padding:1.25rem 1.4rem;">
+
+    <form method="POST" action="{{ url_for('qc_submit_manual', order_id=order_id) }}"
+          id="inspect-form">
+
+      <div style="display:flex; gap:2rem; align-items:flex-start; flex-wrap:wrap;">
+
+        {# ── Left: brick picker ───────────────────────────── #}
+        <div style="flex:1; min-width:320px; display:flex; flex-direction:column; gap:.6rem;">
+          <p style="font-size:.82rem; color:var(--text-muted); margin-bottom:.5rem;">
+            Klik farven du ser på hvert lag — <strong>top først</strong>.
+          </p>
+
+          {% for i in range(expected | length) %}
+          <div class="card" style="padding:.7rem .9rem; display:flex; align-items:center; gap:.85rem; flex-wrap:wrap;">
+            <span style="width:2.8rem; flex-shrink:0; font-size:.72rem; font-weight:700;
+                         color:var(--text-muted); text-align:right;">
+              LAG {{ i + 1 }}
+            </span>
+            <div style="display:flex; gap:.4rem; flex-wrap:wrap;">
+              {% for colour in all_colors %}
+              <label class="brick-label">
+                <input type="radio" name="layer_{{ i }}" value="{{ colour }}"
+                       data-layer="{{ i }}" required />
+                <div class="brick-btn" data-color="{{ colour }}">{{ colour }}</div>
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+          {% endfor %}
+
+          <div style="display:flex; gap:.75rem; align-items:center; margin-top:.75rem;">
+            <button type="submit" class="btn btn-primary" id="submit-btn" disabled>
+              Tjek rækkefølge
+            </button>
+            <a href="{{ url_for('qc') }}" class="btn btn-secondary">Annuller</a>
+            <span id="progress-hint" style="font-size:.8rem; color:var(--text-muted);">
+              Vælg farve for alle {{ expected | length }} lag
+            </span>
+          </div>
+        </div>
+
+        {# ── Right: live figure preview ────────────────────── #}
+        <div style="flex-shrink:0; display:flex; flex-direction:column; align-items:center; gap:.5rem;">
+          <span style="font-size:.72rem; font-weight:700; text-transform:uppercase;
+                       letter-spacing:.06em; color:var(--text-muted); margin-bottom:.25rem;">
+            Samlet figur
+          </span>
+
+          <div id="figure-preview"
+               style="display:flex; flex-direction:column; gap:4px; width:140px;">
+            {% for i in range(expected | length) %}
+            <div class="figure-layer" id="layer-preview-{{ i }}"
+                 data-layer="{{ i }}"
+                 style="width:100%; height:40px; border-radius:6px;
+                        background:var(--surface-2); border:2px dashed var(--border);
+                        display:flex; align-items:center; justify-content:center;
+                        font-size:.72rem; color:var(--text-muted); font-style:italic;
+                        transition:background .2s, border-color .2s, color .2s;">
+              lag {{ i + 1 }}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  const total   = {{ expected | length }};
+  const filled  = {};
+
+  // CSS variable → hex for each colour (mirrors style.css values)
+  const colorMap = {
+    blue:   'var(--color-blue)',
+    yellow: 'var(--color-yellow)',
+    green:  'var(--color-green)',
+    white:  'var(--color-white)',
+    red:    'var(--color-red)',
+    orange: 'var(--color-orange)',
+    purple: 'var(--color-purple)',
+  };
+  const lightText = new Set(['yellow', 'white', 'orange']);
+
+  document.querySelectorAll('input[type=radio]').forEach(radio => {
+    radio.addEventListener('change', function () {
+      const layer  = parseInt(this.dataset.layer, 10);
+      const colour = this.value;
+      filled[layer] = colour;
+
+      // Update preview block
+      const preview = document.getElementById('layer-preview-' + layer);
+      if (preview) {
+        preview.style.background    = colorMap[colour] || '#9ca3af';
+        preview.style.borderColor   = 'transparent';
+        preview.style.color         = lightText.has(colour) ? '#333' : '#fff';
+        preview.style.fontStyle     = 'normal';
+        preview.style.fontWeight    = '600';
+        preview.style.textShadow    = lightText.has(colour) ? 'none' : '0 1px 2px rgba(0,0,0,.35)';
+        preview.textContent         = colour;
+      }
+
+      // Enable submit when all layers chosen
+      const done = Object.keys(filled).length;
+      const btn  = document.getElementById('submit-btn');
+      const hint = document.getElementById('progress-hint');
+      if (done >= total) {
+        btn.disabled      = false;
+        hint.textContent  = 'Alle lag valgt — klar til tjek.';
+      } else {
+        hint.textContent  = done + ' / ' + total + ' lag valgt';
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

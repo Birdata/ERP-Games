@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block title %}Økonomi — LEGO ERP{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Økonomi</h1>
+  <p>Kassekreditcheck, betalinger og samlebog.</p>
+</div>
+
+{# ── Kassekreditstatus ────────────────────────────────────── #}
+{% set used_pct = [(credit_used / credit_limit * 100) | round | int, 100] | min %}
+<div class="credit-meter">
+  <div class="credit-meter-labels">
+    <span><strong>Kassekreditstatus</strong></span>
+    <span>
+      <span style="color:var(--text-muted);">Brugt:</span>
+      <strong>{{ "{:,.0f}".format(credit_used) }} kr</strong>
+      &nbsp;/&nbsp;
+      <span style="color:var(--text-muted);">Grænse:</span>
+      <strong>{{ "{:,.0f}".format(credit_limit) }} kr</strong>
+      &nbsp;&nbsp;
+      <span style="color:{% if credit_avail > 50000 %}var(--success){% elif credit_avail > 10000 %}var(--warning){% else %}var(--danger){% endif %}; font-weight:700;">
+        Til rådighed: {{ "{:,.0f}".format(credit_avail) }} kr
+      </span>
+    </span>
+  </div>
+  <div class="credit-meter-bar-bg">
+    <div class="credit-meter-bar-fill {% if used_pct > 90 %}low{% elif used_pct > 70 %}mid{% endif %}"
+         style="width:{{ used_pct }}%;"></div>
+  </div>
+</div>
+
+{# ── 1. Afventer kapital-godkendelse ─────────────────────── #}
+<div class="section-block">
+  <div class="section-head">
+    <h2>Afventer kapital-godkendelse</h2>
+    <span class="section-count">{{ pending_kapital | length }}</span>
+  </div>
+
+  {% if pending_kapital %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Ordre-ID</th>
+        <th>Kunde</th>
+        <th>Figur</th>
+        <th>Est. pris</th>
+        <th>Oprettet</th>
+        <th>Handling</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in pending_kapital %}
+      <tr>
+        <td><span class="order-id">{{ o.order_id }}</span></td>
+        <td>{{ o.customer }}</td>
+        <td>{{ o.figure_id }}</td>
+        <td class="amount">{{ "{:,.0f}".format(o.estimated_cost or 0) }} kr</td>
+        <td style="color:var(--text-muted);font-size:.82rem;">{{ o.created_at[:16] }}</td>
+        <td>
+          <div class="action-group">
+            <form method="POST" action="{{ url_for('oekonomi_godkend_kapital', order_id=o.order_id) }}" style="display:inline;">
+              <button class="btn btn-success btn-sm">Godkend alligevel</button>
+            </form>
+            <form method="POST" action="{{ url_for('oekonomi_afvis_kapital', order_id=o.order_id) }}" style="display:inline;">
+              <button class="btn btn-danger btn-sm">Afvis</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="section-empty">Ingen ordrer afventer kapital-godkendelse.</p>
+  {% endif %}
+</div>
+
+{# ── 2. Betalingsindbakke ─────────────────────────────────── #}
+<div class="section-block">
+  <div class="section-head">
+    <h2>Betalingsanmodninger</h2>
+    <span class="section-count">
+      {% set not_paid = payments | selectattr('status', 'equalto', 'ikke_betalt') | list | length %}
+      {{ not_paid }} afventer
+    </span>
+  </div>
+
+  {% if payments %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Ordre-ID</th>
+        <th>Leverandør</th>
+        <th>Beløb</th>
+        <th>Fakturanr.</th>
+        <th>Status</th>
+        <th>Dato</th>
+        <th>Handling</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in payments %}
+      <tr>
+        <td><span class="order-id">{{ p.order_id }}</span></td>
+        <td>{{ p.supplier or '—' }}</td>
+        <td class="amount">{{ "{:,.0f}".format(p.amount or 0) }} kr</td>
+        <td style="font-size:.82rem;color:var(--text-muted);">{{ p.invoice_ref or '—' }}</td>
+        <td>
+          <span class="badge {{ p.status }}">
+            {{ 'Betalt' if p.status == 'betalt' else 'Ikke betalt' }}
+          </span>
+        </td>
+        <td style="color:var(--text-muted);font-size:.82rem;">{{ p.created_at[:10] }}</td>
+        <td>
+          {% if p.status == 'ikke_betalt' %}
+          <form method="POST" action="{{ url_for('oekonomi_betal', payment_id=p.id) }}" style="display:inline;">
+            <button class="btn btn-success btn-sm">Markér betalt</button>
+          </form>
+          {% else %}
+            <span style="color:var(--text-muted);font-size:.82rem;">—</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="section-empty">Ingen betalingsanmodninger modtaget endnu.</p>
+  {% endif %}
+</div>
+
+{# ── 3. Samlebog ──────────────────────────────────────────── #}
+<div class="section-block">
+  <div class="section-head">
+    <h2>Samlebog — fakturerede ordrer</h2>
+    <span class="section-count">{{ invoices | length }}</span>
+  </div>
+
+  {% if invoices %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Ordre-ID</th>
+        <th>Kunde</th>
+        <th>Figur</th>
+        <th>Beløb</th>
+        <th>Fakturadato</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set today = namespace(val='') %}
+      {% for inv in invoices %}
+      <tr {% if inv.invoice_date == today_str %}style="background:#f0fdf4;"{% endif %}>
+        <td><span class="order-id">{{ inv.order_id }}</span></td>
+        <td>{{ inv.customer }}</td>
+        <td>{{ inv.figure_id }}</td>
+        <td class="amount"
+            {% if inv.invoice_date and inv.invoice_date == (now_date | default('')) %}
+              style="color:var(--success);font-weight:800;"
+            {% endif %}>
+          {{ "{:,.0f}".format(inv.amount or 0) }} kr
+        </td>
+        <td style="color:var(--text-muted);font-size:.82rem;">{{ inv.invoice_date or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="samlebog-footer">
+    <span class="samlebog-today">
+      Dagens omsætning: <strong>{{ "{:,.0f}".format(today_sum) }} kr</strong>
+    </span>
+    <span class="samlebog-total">
+      Total: {{ "{:,.0f}".format(total_sum) }} kr
+    </span>
+  </div>
+  {% else %}
+    <p class="section-empty">Ingen fakturerede ordrer endnu.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

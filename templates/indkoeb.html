@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Indkøb — LEGO ERP{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Indkøb</h1>
+  <p>Prischeck og bekræftelse af komponenthentning.</p>
+</div>
+
+<div class="section-block">
+  <div class="section-head">
+    <h2>Afventer hentning</h2>
+    <span class="section-count">{{ orders | length }}</span>
+  </div>
+
+  {% if orders %}
+    {% for o in orders %}
+    <div style="border-bottom:1px solid var(--border); padding:1.25rem 1.4rem;">
+
+      <div style="display:flex; align-items:center; gap:1rem; margin-bottom:1rem; flex-wrap:wrap;">
+        <span class="order-id">{{ o.order_id }}</span>
+        <span>{{ o.customer }}</span>
+        <span style="color:var(--text-muted);">{{ o.figure_id }}</span>
+        <span class="pill pill-indkoeb_afventer">Afventer hentning</span>
+      </div>
+
+      {# Component list / hentliste #}
+      {% if components.get(o.order_id) %}
+      <div style="margin-bottom:1rem;">
+        <h3>Hentliste</h3>
+        <table class="comp-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Komponent</th>
+              <th>Antal</th>
+              <th>Enhedspris</th>
+              <th>Subtotal</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% set ns = namespace(total=0, i=0) %}
+            {% for c in components[o.order_id] %}
+            {% set sub = c.quantity * c.unit_price %}
+            {% set ns.total = ns.total + sub %}
+            {% set ns.i = ns.i + 1 %}
+            <tr>
+              <td style="color:var(--text-muted);">{{ ns.i }}</td>
+              <td>{{ c.component }}</td>
+              <td style="font-weight:600;">{{ c.quantity }}</td>
+              <td>{{ "{:,.2f}".format(c.unit_price) }} kr</td>
+              <td class="amount">{{ "{:,.2f}".format(sub) }} kr</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <div class="comp-total">
+          Total: <strong>{{ "{:,.0f}".format(ns.total) }} kr</strong>
+          {% if o.estimated_cost and (ns.total - o.estimated_cost) | abs > 0.01 %}
+            <span style="color:var(--warning); font-size:.8rem; margin-left:.5rem;">
+              ⚠ Prisafvigelse: {{ "{:+,.0f}".format(ns.total - o.estimated_cost) }} kr
+              vs. estimat
+            </span>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+
+      <form method="POST" action="{{ url_for('indkoeb_bekraeft', order_id=o.order_id) }}">
+        <button class="btn btn-success">Bekræft hentning — klodser hentet</button>
+      </form>
+
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="section-empty">Ingen indkøbsordrer afventer hentning.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

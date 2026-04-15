@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}LEGO ERP{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+
+  <!-- ── Sidebar ──────────────────────────────────────────── -->
+  <nav class="sidebar">
+
+    <div class="sidebar-brand">
+      <div class="brand-studs">
+        <span class="brand-stud"></span>
+        <span class="brand-stud"></span>
+        <span class="brand-stud"></span>
+        <span class="brand-stud"></span>
+      </div>
+      <div>
+        <div class="brand-name">LEGO ERP</div>
+        <div class="brand-sub">Produktionsstyring</div>
+      </div>
+    </div>
+
+    <ul class="sidebar-nav">
+
+      <!-- Dashboard -->
+      <li class="{{ 'active' if request.endpoint == 'dashboard' else '' }}">
+        <a href="{{ url_for('dashboard') }}">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+            <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+          </svg>
+          Dashboard
+        </a>
+      </li>
+
+      <li class="nav-section-label">Afdelinger</li>
+
+      <!-- Salg -->
+      <li class="{{ 'active' if request.endpoint in ('salg','salg_ny_ordre','salg_godkend_kunde','salg_afvis_kunde','salg_registrer_afhentning','salg_opret_faktura') else '' }}">
+        <a href="{{ url_for('salg') }}">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
+            <line x1="3" y1="6" x2="21" y2="6"/>
+            <path d="M16 10a4 4 0 0 1-8 0"/>
+          </svg>
+          Salg
+          {% if badges.salg %}<span class="nav-badge">{{ badges.salg }}</span>{% endif %}
+        </a>
+      </li>
+
+      <!-- Økonomi -->
+      <li class="{{ 'active' if request.endpoint in ('oekonomi','oekonomi_godkend_kapital','oekonomi_afvis_kapital','oekonomi_betal') else '' }}">
+        <a href="{{ url_for('oekonomi') }}">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+          </svg>
+          Økonomi
+          {% if badges.oekonomi %}<span class="nav-badge">{{ badges.oekonomi }}</span>{% endif %}
+        </a>
+      </li>
+
+      <!-- Logistik -->
+      <li class="{{ 'active' if request.endpoint in ('logistik','logistik_send_indkoeb','logistik_send_payment_request','logistik_notificer_prod','logistik_bekraeft_prod','logistik_bekraeft_salg','logistik_notificer_salg') else '' }}">
+        <a href="{{ url_for('logistik') }}">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="1" y="3" width="15" height="13" rx="1"/>
+            <path d="M16 8h4l3 3v5h-7V8z"/>
+            <circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>
+          </svg>
+          Logistik
+          {% if badges.logistik %}<span class="nav-badge">{{ badges.logistik }}</span>{% endif %}
+        </a>
+      </li>
+
+      <!-- Indkøb -->
+      <li class="{{ 'active' if request.endpoint in ('indkoeb','indkoeb_bekraeft') else '' }}">
+        <a href="{{ url_for('indkoeb') }}">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
+            <line x1="3" y1="6" x2="21" y2="6"/>
+            <polyline points="9 12 12 15 15 12"/>
+            <line x1="12" y1="9" x2="12" y2="15"/>
+          </svg>
+          Indkøb
+          {% if badges.indkoeb %}<span class="nav-badge">{{ badges.indkoeb }}</span>{% endif %}
+        </a>
+      </li>
+
+      <!-- Produktion -->
+      <li class="{{ 'active' if request.endpoint in ('produktion','produktion_hent','produktion_faerdig') else '' }}">
+        <a href="{{ url_for('produktion') }}">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+          </svg>
+          Produktion
+          {% if badges.produktion %}<span class="nav-badge">{{ badges.produktion }}</span>{% endif %}
+        </a>
+      </li>
+
+      <!-- Sikkerhed & Kvalitet -->
+      <li class="{{ 'active' if request.endpoint in ('qc','qc_inspect','qc_godkend','qc_afvis') else '' }}">
+        <a href="{{ url_for('qc') }}">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+          Sikkerhed &amp; Kvalitet
+          {% if badges.qc %}<span class="nav-badge">{{ badges.qc }}</span>{% endif %}
+        </a>
+      </li>
+
+      <li class="nav-section-label">System</li>
+
+      <!-- Historik -->
+      <li class="{{ 'active' if request.endpoint == 'historik' else '' }}">
+        <a href="{{ url_for('historik') }}">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+          Historik
+        </a>
+      </li>
+
+    </ul>
+
+    <div class="sidebar-footer">LEGO ERP · v2.0</div>
+
+  </nav>
+
+  <!-- ── Main ─────────────────────────────────────────────── -->
+  <div class="main-wrap">
+    <main class="page-body">
+
+      <!-- Live clock -->
+      <div class="topbar">
+        <span id="clock" class="topbar-clock"></span>
+      </div>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <ul class="flashes">
+            {% for category, message in messages %}
+              <li class="{{ category }}">{{ message }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      {% endwith %}
+
+      {% block content %}{% endblock %}
+
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      function tick() {
+        const el = document.getElementById('clock');
+        if (!el) return;
+        const now = new Date();
+        el.textContent = now.toLocaleTimeString('da-DK', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+      }
+      tick();
+      setInterval(tick, 1000);
+    })();
+  </script>
+
+</body>
+</html>
