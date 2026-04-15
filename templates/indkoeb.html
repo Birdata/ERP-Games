@@ -32,13 +32,21 @@
         {% endif %}
       </div>
 
-      {# Samlet hentliste for alle produkter #}
-      <div style="margin-bottom:1rem;">
-        <h3>Hentliste</h3>
+      {# Hentliste per ordre #}
+      {% set ns = namespace(ko_total=0) %}
+      {% for o in orders %}
+      {% set comps = order_components.get(o.order_id, []) %}
+      <div style="margin-bottom:1.1rem;">
+        <div style="display:flex; align-items:center; gap:.6rem; margin-bottom:.5rem;">
+          <span class="order-id" style="font-size:.82rem;">{{ o.order_id }}</span>
+          <span style="font-size:.82rem; color:var(--text-muted);">{{ o.figure_id }}</span>
+          {% if o.quantity and o.quantity > 1 %}
+            <span class="pill" style="font-size:.72rem;">× {{ o.quantity }} stk.</span>
+          {% endif %}
+        </div>
         <table class="comp-table">
           <thead>
             <tr>
-              <th>Figur</th>
               <th>Komponent</th>
               <th>Antal</th>
               <th>Enhedspris</th>
@@ -46,25 +54,31 @@
             </tr>
           </thead>
           <tbody>
-            {% set ns = namespace(total=0) %}
-            {% for o in orders %}
-              {% for c in components.get(o.order_id, []) %}
-                {% set sub = c.quantity * c.unit_price %}
-                {% set ns.total = ns.total + sub %}
-                <tr>
-                  <td style="color:var(--text-muted); font-size:.82rem;">{{ o.figure_id }}</td>
-                  <td>{{ c.component }}</td>
-                  <td style="font-weight:600;">{{ c.quantity }}</td>
-                  <td>{{ "{:,.2f}".format(c.unit_price) }} kr</td>
-                  <td class="amount">{{ "{:,.2f}".format(sub) }} kr</td>
-                </tr>
-              {% endfor %}
+            {% for c in comps %}
+              {% set sub = c.quantity * c.unit_price %}
+              {% set ns.ko_total = ns.ko_total + sub %}
+              {% set color = comp_colors.get(c.component, '') %}
+              <tr>
+                <td>
+                  {% if color %}
+                    <span style="display:inline-block; width:13px; height:13px;
+                                 border-radius:50%; background:{{ color }};
+                                 border:1px solid rgba(128,128,128,0.5);
+                                 vertical-align:middle; margin-right:6px;"></span>
+                  {% endif %}
+                  {{ c.component }}
+                </td>
+                <td style="font-weight:600;">{{ c.quantity }}</td>
+                <td>{{ "{:,.2f}".format(c.unit_price) }} kr</td>
+                <td class="amount">{{ "{:,.2f}".format(sub) }} kr</td>
+              </tr>
             {% endfor %}
           </tbody>
         </table>
-        <div class="comp-total">
-          Total: <strong>{{ "{:,.0f}".format(ns.total) }} kr</strong>
-        </div>
+      </div>
+      {% endfor %}
+      <div class="comp-total">
+        Total: <strong>{{ "{:,.0f}".format(ns.ko_total) }} kr</strong>
       </div>
 
       <form method="POST" action="{{ url_for('indkoeb_bekraeft', ko_no=ko.customer_order_no) }}">

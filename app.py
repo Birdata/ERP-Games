@@ -440,29 +440,31 @@ def salg():
                            now=_now())
 
 
-def _create_order_line(db, customer_order_no: str, customer: str, figure_id: str) -> str:
+def _create_order_line(db, customer_order_no: str, customer: str, figure_id: str,
+                       quantity: int = 1) -> str:
     """Create one order line item under a KO. Returns order_id."""
-    order_id  = _db.next_order_id(db)
-    cost      = _db.figure_cost(db, figure_id)
-    # Use discount from customers table if available, else fall back to hardcoded
-    c_row     = _db.get_customer_by_name(db, customer)
-    discount  = c_row["discount_pct"] if c_row else _db.CUSTOMER_DISCOUNTS.get(customer, 0.0)
+    order_id      = _db.next_order_id(db)
+    unit_cost     = _db.figure_cost(db, figure_id)
+    total_cost    = unit_cost * quantity
+    c_row         = _db.get_customer_by_name(db, customer)
+    discount      = c_row["discount_pct"] if c_row else _db.CUSTOMER_DISCOUNTS.get(customer, 0.0)
     list_price    = _db.FIGURE_LIST_PRICES.get(figure_id, 0.0)
-    selling_price = round(list_price * (1.0 - discount), 2)
+    selling_price = round(list_price * (1.0 - discount) * quantity, 2)
 
     db.execute(
         "INSERT INTO orders"
-        " (order_id, customer_order_no, customer, figure_id, status, estimated_cost, selling_price)"
-        " VALUES (?, ?, ?, ?, 'oekonomi_check', ?, ?)",
-        (order_id, customer_order_no, customer, figure_id, cost, selling_price),
+        " (order_id, customer_order_no, customer, figure_id, status,"
+        "  quantity, estimated_cost, selling_price)"
+        " VALUES (?, ?, ?, ?, 'oekonomi_check', ?, ?, ?)",
+        (order_id, customer_order_no, customer, figure_id, quantity, total_cost, selling_price),
     )
     _log_event(db, order_id, "ny_ordre",
-               f"Oprettet under {customer_order_no} for {customer}")
+               f"Oprettet under {customer_order_no} for {customer} (antal: {quantity})")
     db.commit()
 
     # Auto økonomi check — brug kassekredit + overskudslikviditet
-    available = _db.total_available(db)
-    new_status = "kapital_ok" if available >= cost else "pending_kapital"
+    available  = _db.total_available(db)
+    new_status = "kapital_ok" if available >= total_cost else "pending_kapital"
     _update_status(db, order_id, new_status)
 
     if new_status == "kapital_ok":
@@ -522,9 +524,8 @@ def salg_ny_kundeordre():
             qty = max(1, int(quantities[i])) if i < len(quantities) else 1
         except (ValueError, IndexError):
             qty = 1
-        for _ in range(qty):
-            oid = _create_order_line(db, ko_no, customer, fig)
-            created_ids.append(oid)
+        oid = _create_order_line(db, ko_no, customer, fig, quantity=qty)
+        created_ids.append(oid)
 
     exp_label = f" — forventet levering om {delivery_mins} min" if delivery_mins else ""
     flash(
@@ -557,8 +558,8 @@ def salg_tilfoej_produkt(ko_no):
     except ValueError:
         qty = 1
 
-    created_ids = [_create_order_line(db, ko_no, ko["customer"], figure_id) for _ in range(qty)]
-    flash(f"{len(created_ids)} produkt(er) tilføjet til {ko_no} ({', '.join(created_ids)}).", "info")
+    created_ids = [_create_order_line(db, ko_no, ko["customer"], figure_id, quantity=qty)]
+    flash(f"Produkt tilføjet til {ko_no} ({created_ids[0]}, antal: {qty}).", "info")
     return redirect(url_for("salg"))
 
 
@@ -908,9 +909,9 @@ def indkoeb():
         "               AND o.status='indkoeb_afventer')"
         " ORDER BY co.created_at"
     ).fetchall()
-    # All orders per KO + their components
+    # All orders per KO + per-order components (quantity × order.quantity)
     ko_orders = {}
-    components = {}
+    order_components = {}  # {order_id: [{component, quantity, unit_price}]}
     for ko in kos:
         orders = db.execute(
             "SELECT * FROM orders WHERE customer_order_no=? AND status='indkoeb_afventer'",
@@ -918,11 +919,23 @@ def indkoeb():
         ).fetchall()
         ko_orders[ko["customer_order_no"]] = orders
         for o in orders:
-            components[o["order_id"]] = db.execute(
+            qty_mult = o["quantity"] if o["quantity"] else 1
+            rows = db.execute(
                 "SELECT component, quantity, unit_price FROM component_prices WHERE figure_id=?",
                 (o["figure_id"],),
             ).fetchall()
-    return render_template("indkoeb.html", kos=kos, ko_orders=ko_orders, components=components)
+            order_components[o["order_id"]] = [
+                {"component": c["component"],
+                 "quantity":  c["quantity"] * qty_mult,
+                 "unit_price": c["unit_price"]}
+                for c in rows
+            ]
+
+    # Reverse map: varenummer → CSS colour name
+    comp_colors = {varenr: color for color, (varenr, _) in _db.COMPONENTS.items()}
+
+    return render_template("indkoeb.html", kos=kos, ko_orders=ko_orders,
+                           order_components=order_components, comp_colors=comp_colors)
 
 
 @app.post("/indkoeb/bekraeft/<ko_no>")
@@ -932,7 +945,8 @@ def indkoeb_bekraeft(ko_no):
         "SELECT * FROM orders WHERE customer_order_no=? AND status='indkoeb_afventer'", (ko_no,)
     ).fetchall()
     for o in orders:
-        actual = _db.figure_cost(db, o["figure_id"])
+        qty    = o["quantity"] if o["quantity"] else 1
+        actual = _db.figure_cost(db, o["figure_id"]) * qty
         db.execute("UPDATE orders SET actual_cost=? WHERE order_id=?", (actual, o["order_id"]))
     db.commit()
     _update_ko_status(db, ko_no, "klodser_hentet")

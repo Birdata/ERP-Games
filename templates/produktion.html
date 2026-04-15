@@ -106,26 +106,39 @@
         {% endif %}
       </div>
 
-      {# One card per item in this KO #}
+      {# One card per unique figure_id in this KO #}
       <div style="display:flex; flex-direction:column; gap:0;">
-        {% for o in group %}
-        {% set seq = sequences.get(o.figure_id, []) %}
+        {% for fig_id, fig_orders in group | groupby('figure_id') %}
+        {% set fig_orders = fig_orders | list %}
+        {% set ns2 = namespace(total_qty=0) %}
+        {% for o in fig_orders %}{% set ns2.total_qty = ns2.total_qty + (o.quantity or 1) %}{% endfor %}
+        {% set seq = sequences.get(fig_id, []) %}
         <div style="display:flex; align-items:flex-start; gap:1.5rem; flex-wrap:wrap;
                     padding:1rem; border-top:1px solid var(--border);">
 
-          {# Order info #}
+          {# Figure info + quantity badge #}
           <div style="min-width:140px;">
-            <a href="{{ url_for('ordre_detail', order_id=o.order_id) }}"
-               class="order-id" style="text-decoration:none; margin-bottom:.3rem; display:block;">
-              {{ o.order_id }}
-            </a>
-            <div style="font-size:.82rem; color:var(--text-muted);">{{ o.figure_id }}</div>
-            <div style="font-size:.75rem; color:var(--text-muted); margin-top:.25rem;">
-              {{ o.updated_at[:16] }}
+            <div style="font-weight:600; font-size:.95rem; margin-bottom:.25rem;">
+              {{ fig_id }}
+            </div>
+            <div style="font-size:.82rem; color:var(--text-muted);">
+              {% if ns2.total_qty > 1 %}
+                <span class="pill" style="font-size:.8rem; font-weight:700;">× {{ ns2.total_qty }} stk.</span>
+              {% else %}
+                × 1 stk.
+              {% endif %}
+            </div>
+            <div style="font-size:.72rem; color:var(--text-muted); margin-top:.4rem;">
+              {% for o in fig_orders %}
+                <div><a href="{{ url_for('ordre_detail', order_id=o.order_id) }}"
+                        class="order-id" style="text-decoration:none; font-size:.72rem;">
+                  {{ o.order_id }}
+                </a></div>
+              {% endfor %}
             </div>
           </div>
 
-          {# Build sequence #}
+          {# Build sequence — shown once #}
           <div style="flex:1; min-width:180px;">
             <div style="font-size:.72rem; font-weight:600; text-transform:uppercase;
                         letter-spacing:.06em; color:var(--text-muted); margin-bottom:.5rem;">
