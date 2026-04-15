@@ -2,7 +2,10 @@ import os
 import tempfile
 import threading
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
+_TZ = ZoneInfo("Europe/Copenhagen")
 
 import cv2
 from flask import (Flask, Response, flash, g, jsonify,
@@ -146,8 +149,38 @@ def inject_globals():
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Maps status → department name (used for event log)
+_STATUS_DEPT: dict[str, str] = {
+    "ny_ordre":            "Salg",
+    "oekonomi_check":      "Økonomi",
+    "pending_kapital":     "Økonomi",
+    "kapital_ok":          "Økonomi",
+    "pending_kunde":       "Salg",
+    "kunde_godkendt":      "Salg",
+    "indkoeb_afventer":    "Indkøb",
+    "klodser_hentet":      "Logistik",
+    "klar_til_produktion": "Logistik",
+    "i_produktion":        "Produktion",
+    "klar_til_qc":         "Produktion",
+    "paa_lager":           "S&K / Logistik",
+    "klar_til_afhentning": "Logistik",
+    "afhentet":            "Salg",
+    "faktureret":          "Økonomi",
+    "afvist":              "—",
+}
+
+
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _log_event(db, order_id: str, status: str, note: str | None = None):
+    """Append one row to order_events."""
+    db.execute(
+        "INSERT INTO order_events (order_id, status, department, note, timestamp)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (order_id, status, _STATUS_DEPT.get(status, "—"), note, _now()),
+    )
 
 
 def _update_status(db, order_id: str, status: str, extra: dict | None = None):
@@ -159,6 +192,7 @@ def _update_status(db, order_id: str, status: str, extra: dict | None = None):
         f"UPDATE orders SET {set_clause} WHERE order_id=?",
         list(fields.values()) + [order_id],
     )
+    _log_event(db, order_id, status)
     db.commit()
 
 
@@ -286,6 +320,7 @@ def salg_ny_ordre():
         " VALUES (?, ?, ?, 'oekonomi_check', ?, ?)",
         (order_id, customer, figure_id, cost, selling_price),
     )
+    _log_event(db, order_id, "ny_ordre", f"Ordre oprettet af Salg for {customer}")
     db.commit()
 
     # Auto-run økonomi check
@@ -876,6 +911,66 @@ def historik():
         "SELECT * FROM orders ORDER BY created_at DESC"
     ).fetchall()
     return render_template("historik.html", orders=orders)
+
+
+@app.get("/ordre/<order_id>")
+def ordre_detail(order_id):
+    db = get_db()
+    order = db.execute(
+        "SELECT * FROM orders WHERE order_id=?", (order_id,)
+    ).fetchone()
+    if not order:
+        flash("Ordre ikke fundet.", "error")
+        return redirect(url_for("historik"))
+
+    raw_events = db.execute(
+        "SELECT * FROM order_events WHERE order_id=? ORDER BY timestamp ASC",
+        (order_id,),
+    ).fetchall()
+
+    # Calculate time spent in each step
+    events = []
+    for i, ev in enumerate(raw_events):
+        try:
+            t_start = datetime.strptime(ev["timestamp"], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            t_start = None
+
+        duration_min = None
+        if i + 1 < len(raw_events) and t_start:
+            try:
+                t_next = datetime.strptime(raw_events[i + 1]["timestamp"], "%Y-%m-%d %H:%M:%S")
+                duration_min = int((t_next - t_start).total_seconds() / 60)
+            except ValueError:
+                pass
+        elif i == len(raw_events) - 1 and t_start:
+            # Last event: time until now
+            duration_min = int((datetime.now(_TZ).replace(tzinfo=None) - t_start).total_seconds() / 60)
+
+        events.append({
+            "status":      ev["status"],
+            "department":  ev["department"],
+            "note":        ev["note"],
+            "timestamp":   ev["timestamp"],
+            "duration_min": duration_min,
+            "is_last":     i == len(raw_events) - 1,
+        })
+
+    # Total cycle time
+    total_min = None
+    if raw_events:
+        try:
+            t0 = datetime.strptime(raw_events[0]["timestamp"], "%Y-%m-%d %H:%M:%S")
+            t1 = datetime.now(_TZ).replace(tzinfo=None)
+            total_min = int((t1 - t0).total_seconds() / 60)
+        except ValueError:
+            pass
+
+    return render_template("ordre_detail.html",
+                           order=order,
+                           events=events,
+                           total_min=total_min,
+                           status_labels=_db.STATUS_LABELS)
 
 
 # ===========================================================================

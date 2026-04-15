@@ -139,6 +139,15 @@ CREATE TABLE IF NOT EXISTS component_prices (
     quantity    INTEGER,
     unit_price  REAL
 );
+
+CREATE TABLE IF NOT EXISTS order_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id    TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    department  TEXT,
+    note        TEXT,
+    timestamp   DATETIME NOT NULL
+);
 """
 
 

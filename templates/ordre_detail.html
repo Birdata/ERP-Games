@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% block title %}{{ order.order_id }} — LEGO ERP{% endblock %}
+
+{% block content %}
+
+{% macro fmt_dur(min) %}
+  {%- if min is none -%}—
+  {%- elif min < 60 -%}{{ min }} min
+  {%- else -%}{{ (min // 60) }}t {{ (min % 60) }}min
+  {%- endif -%}
+{% endmacro %}
+
+<div class="page-header" style="display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:1rem;">
+  <div>
+    <h1 style="display:flex; align-items:center; gap:.75rem;">
+      <span class="order-id" style="font-size:1.4rem;">{{ order.order_id }}</span>
+      <span class="pill pill-{{ order.status }}">
+        {{ status_labels.get(order.status, order.status) }}
+      </span>
+    </h1>
+    <p style="margin:.25rem 0 0;">
+      {{ order.customer }} &nbsp;·&nbsp; {{ order.figure_id }}
+      {% if order.holdeplads %}
+        &nbsp;·&nbsp; Holdeplads <strong>{{ order.holdeplads }}</strong>
+      {% endif %}
+    </p>
+  </div>
+  <a href="{{ url_for('historik') }}" class="btn btn-secondary btn-sm" style="margin-top:.25rem;">
+    ← Tilbage til historik
+  </a>
+</div>
+
+{# ── Summary strip ─────────────────────────────────────────── #}
+<div class="kpi-grid" style="margin-bottom:2rem;">
+
+  <div class="kpi-card">
+    <div class="kpi-label">Oprettet</div>
+    <div class="kpi-value" style="font-size:1rem;">{{ order.created_at[:16] if order.created_at else '—' }}</div>
+    <div class="kpi-sub">Tidspunkt for ordre</div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-label">Total tid i system</div>
+    <div class="kpi-value" style="font-size:1.2rem;">{{ fmt_dur(total_min) }}</div>
+    <div class="kpi-sub">Fra oprettelse til nu</div>
+  </div>
+
+  <div class="kpi-card">
+    <div class="kpi-label">Antal statusskift</div>
+    <div class="kpi-value">{{ events | length }}</div>
+    <div class="kpi-sub">Registrerede hændelser</div>
+  </div>
+
+  {% if order.estimated_cost %}
+  <div class="kpi-card">
+    <div class="kpi-label">Est. omkostning</div>
+    <div class="kpi-value" style="font-size:1rem;">{{ "{:,.0f}".format(order.estimated_cost) }} kr</div>
+    <div class="kpi-sub">Komponentpris</div>
+  </div>
+  {% endif %}
+
+  {% if order.selling_price %}
+  <div class="kpi-card">
+    <div class="kpi-label">Salgspris</div>
+    <div class="kpi-value" style="font-size:1rem;">{{ "{:,.0f}".format(order.selling_price) }} kr</div>
+    <div class="kpi-sub">Inkl. evt. rabat</div>
+  </div>
+  {% endif %}
+
+  {% if order.qc_result %}
+  <div class="kpi-card">
+    <div class="kpi-label">QC-resultat</div>
+    <div class="kpi-value" style="font-size:1rem; color: {{ '#27ae60' if order.qc_result == 'pass' else '#c0392b' }};">
+      {{ 'Godkendt' if order.qc_result == 'pass' else 'Fejlet' }}
+    </div>
+    <div class="kpi-sub">Kvalitetskontrol</div>
+  </div>
+  {% endif %}
+
+</div>
+
+{# ── Timeline ──────────────────────────────────────────────── #}
+<div class="section-block">
+  <div class="section-head">
+    <h2>Hændelseslog</h2>
+    <span class="section-count">{{ events | length }} hændelser</span>
+  </div>
+
+  {% if events %}
+  <div style="padding:1.5rem 1.75rem;">
+    <div class="timeline">
+      {% for ev in events %}
+      <div class="timeline-item {% if ev.is_last %}timeline-item--current{% endif %}">
+
+        {# Dot + line #}
+        <div class="timeline-track">
+          <div class="timeline-dot {% if ev.is_last %}timeline-dot--active{% endif %}"></div>
+          {% if not loop.last %}<div class="timeline-line"></div>{% endif %}
+        </div>
+
+        {# Content #}
+        <div class="timeline-content">
+          <div class="timeline-header">
+            <span class="timeline-status pill pill-{{ ev.status }}">
+              {{ status_labels.get(ev.status, ev.status) }}
+            </span>
+            <span class="timeline-dept">{{ ev.department }}</span>
+            <span class="timeline-time">{{ ev.timestamp[:16] }}</span>
+          </div>
+
+          {% if ev.note %}
+          <div class="timeline-note">{{ ev.note }}</div>
+          {% endif %}
+
+          {% if not ev.is_last and ev.duration_min is not none %}
+          <div class="timeline-duration">
+            <span class="duration-bar-wrap">
+              <span class="duration-label">Tid i dette trin: <strong>{{ fmt_dur(ev.duration_min) }}</strong></span>
+            </span>
+          </div>
+          {% elif ev.is_last and ev.duration_min is not none %}
+          <div class="timeline-duration">
+            <span class="duration-label" style="color:var(--text-muted); font-style:italic;">
+              Stadig her — {{ fmt_dur(ev.duration_min) }} og tæller
+            </span>
+          </div>
+          {% endif %}
+        </div>
+
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% else %}
+  <p class="section-empty" style="padding:1.5rem;">
+    Ingen hændelser logget for denne ordre endnu.
+    Hændelser registreres automatisk fra næste statusskifte.
+  </p>
+  {% endif %}
+</div>
+
+<style>
+/* ── Timeline ────────────────────────── */
+.timeline { display:flex; flex-direction:column; gap:0; }
+
+.timeline-item {
+  display:grid;
+  grid-template-columns: 2rem 1fr;
+  gap:0 1rem;
+  min-height:3.5rem;
+}
+
+.timeline-track {
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+}
+
+.timeline-dot {
+  width:.75rem; height:.75rem;
+  border-radius:50%;
+  background:var(--text-muted);
+  flex-shrink:0;
+  margin-top:.35rem;
+  border:2px solid var(--surface);
+  box-shadow:0 0 0 2px var(--text-muted);
+}
+.timeline-dot--active {
+  background:var(--accent, #e03c2b);
+  box-shadow:0 0 0 2px var(--accent, #e03c2b);
+  animation:pulse 1.8s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,100% { box-shadow:0 0 0 2px var(--accent, #e03c2b); }
+  50%      { box-shadow:0 0 0 5px transparent; }
+}
+
+.timeline-line {
+  width:2px;
+  flex:1;
+  background:var(--border);
+  margin:.25rem 0;
+  min-height:1.5rem;
+}
+
+.timeline-content {
+  padding:.2rem 0 1.25rem;
+}
+
+.timeline-header {
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:.5rem .75rem;
+  margin-bottom:.3rem;
+}
+
+.timeline-dept {
+  font-size:.78rem;
+  color:var(--text-muted);
+  background:var(--surface-2, #2a2a2a);
+  padding:.1rem .45rem;
+  border-radius:.25rem;
+}
+
+.timeline-time {
+  font-size:.78rem;
+  color:var(--text-muted);
+  margin-left:auto;
+  white-space:nowrap;
+}
+
+.timeline-note {
+  font-size:.82rem;
+  color:var(--text-muted);
+  margin-bottom:.3rem;
+  font-style:italic;
+}
+
+.timeline-duration {
+  margin-top:.25rem;
+}
+.duration-label {
+  font-size:.8rem;
+  color:var(--text-muted);
+}
+.duration-label strong {
+  color:var(--text);
+}
+
+.timeline-item--current .timeline-content {
+  background:var(--surface-2, rgba(255,255,255,.04));
+  border-radius:.5rem;
+  padding:.5rem .75rem .75rem;
+  margin-left:-.75rem;
+}
+</style>
+
+{% endblock %}
