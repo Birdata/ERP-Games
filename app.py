@@ -397,8 +397,9 @@ def salg_ny_kundeordre():
     db = get_db()
     customer      = request.form.get("customer", "").strip()
     delivery_mins = request.form.get("delivery_minutes", "").strip()
-    figure_ids    = request.form.getlist("figure_id")
-    figure_ids    = [f for f in figure_ids if f in REFERENCE_SEQUENCES]
+    figure_ids  = request.form.getlist("figure_id")
+    quantities  = request.form.getlist("quantity")
+    figure_ids  = [f for f in figure_ids if f in REFERENCE_SEQUENCES]
 
     if not customer or not figure_ids:
         flash("Udfyld kundenavn og mindst én figur.", "error")
@@ -423,9 +424,14 @@ def salg_ny_kundeordre():
     db.commit()
 
     created_ids = []
-    for fig in figure_ids:
-        oid = _create_order_line(db, ko_no, customer, fig)
-        created_ids.append(oid)
+    for i, fig in enumerate(figure_ids):
+        try:
+            qty = max(1, int(quantities[i])) if i < len(quantities) else 1
+        except (ValueError, IndexError):
+            qty = 1
+        for _ in range(qty):
+            oid = _create_order_line(db, ko_no, customer, fig)
+            created_ids.append(oid)
 
     exp_label = f" — forventet levering om {delivery_mins} min" if delivery_mins else ""
     flash(
@@ -448,8 +454,13 @@ def salg_tilfoej_produkt(ko_no):
         flash("Ugyldig kundeordre eller figur.", "error")
         return redirect(url_for("salg"))
 
-    oid = _create_order_line(db, ko_no, ko["customer"], figure_id)
-    flash(f"{oid} tilføjet til {ko_no}.", "info")
+    try:
+        qty = max(1, int(request.form.get("quantity", 1)))
+    except ValueError:
+        qty = 1
+
+    created_ids = [_create_order_line(db, ko_no, ko["customer"], figure_id) for _ in range(qty)]
+    flash(f"{len(created_ids)} produkt(er) tilføjet til {ko_no} ({', '.join(created_ids)}).", "info")
     return redirect(url_for("salg"))
 
 

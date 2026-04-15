@@ -36,6 +36,8 @@
               <option value="{{ fig }}">{{ fig }}</option>
             {% endfor %}
           </select>
+          <input type="number" name="quantity" min="1" max="99" value="1"
+                 style="width:65px;" title="Antal" />
           <button type="button" class="btn btn-secondary btn-sm"
                   onclick="removeFigur(this)" style="padding:.3rem .7rem;">✕</button>
         </div>
@@ -77,6 +79,8 @@
             <option value="{{ fig }}">{{ fig }}</option>
           {% endfor %}
         </select>
+        <input type="number" name="quantity" min="1" max="99" value="1"
+               style="width:65px;" title="Antal" />
         <button type="submit" class="btn btn-primary btn-sm">Tilføj</button>
       </form>
     </div>
@@ -297,6 +301,8 @@ function addFigur() {
       <option value="" disabled selected>— vælg figur —</option>
       ${figOptions}
     </select>
+    <input type="number" name="quantity" min="1" max="99" value="1"
+           style="width:65px;" title="Antal" />
     <button type="button" class="btn btn-secondary btn-sm"
             onclick="removeFigur(this)" style="padding:.3rem .7rem;">✕</button>`;
   container.appendChild(div);
