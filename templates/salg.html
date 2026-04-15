@@ -14,9 +14,13 @@
     <form method="POST" action="{{ url_for('salg_ny_kundeordre') }}" id="ko-form">
       <div class="form-row">
         <div class="form-group">
-          <label for="customer">Kundenavn</label>
-          <input type="text" id="customer" name="customer"
-                 placeholder="f.eks. Navy Seal" required />
+          <label for="customer">Kunde</label>
+          <select id="customer" name="customer" required onchange="onCustomerChange()">
+            <option value="" disabled selected>— vælg kunde —</option>
+            {% for c in all_customers %}
+              <option value="{{ c.name }}">{{ c.name }} ({{ c.customer_no }})</option>
+            {% endfor %}
+          </select>
         </div>
         <div class="form-group">
           <label for="delivery_minutes">Forventet levering (minutter)</label>
@@ -26,7 +30,7 @@
       </div>
 
       <div style="margin:.75rem 0 .5rem; font-size:.85rem; font-weight:600; color:var(--text-muted);">
-        Produkter
+        Produkter <span id="perm-hint" style="font-weight:400; color:var(--text-muted); font-size:.78rem;"></span>
       </div>
       <div id="figurer" style="display:flex; flex-direction:column; gap:.5rem; margin-bottom:.75rem;">
         <div class="figur-row" style="display:flex; gap:.5rem; align-items:center;">
@@ -284,10 +288,54 @@
 </div>
 
 <script>
-// ── Dynamic figure rows ───────────────────────────────────
-const figOptions = `{% for fig in figures %}<option value="{{ fig }}">{{ fig }}</option>{% endfor %}`;
+// ── Permissions map: {customer_no: {figure_id: bool}} ────
+const PERMS = {{ perms | tojson }};
+// customer_no → name map from all_customers
+const CUST_MAP = {};
+{% for c in all_customers %}
+  CUST_MAP[{{ c.name | tojson }}] = {{ c.customer_no | tojson }};
+{% endfor %}
+
+function getAllowedFigs(customerName) {
+  const cno = CUST_MAP[customerName];
+  if (!cno || !PERMS[cno]) return null; // null = all allowed (unknown customer)
+  const allowed = [];
+  for (const [fig, ok] of Object.entries(PERMS[cno])) {
+    if (ok) allowed.push(fig);
+  }
+  return allowed;
+}
+
+function buildFigOptions(allowed) {
+  // allowed = null → all figures; array → filtered list
+  const all = [{% for fig in figures %}{{ fig | tojson }},{% endfor %}];
+  return all.map(fig => {
+    const ok = allowed === null || allowed.includes(fig);
+    return ok ? `<option value="${fig}">${fig}</option>` : '';
+  }).join('');
+}
+
+function refreshFigSelects() {
+  const customerName = document.getElementById('customer').value;
+  const allowed = customerName ? getAllowedFigs(customerName) : null;
+  document.querySelectorAll('#figurer select[name="figure_id"]').forEach(sel => {
+    const prev = sel.value;
+    sel.innerHTML = '<option value="" disabled selected>— vælg figur —</option>' + buildFigOptions(allowed);
+    if (prev && (allowed === null || allowed.includes(prev))) sel.value = prev;
+  });
+  const hint = document.getElementById('perm-hint');
+  if (hint && allowed !== null) {
+    hint.textContent = `(${allowed.length} godkendte produkter for denne kunde)`;
+  } else if (hint) {
+    hint.textContent = '';
+  }
+}
+
+function onCustomerChange() { refreshFigSelects(); }
 
 function addFigur() {
+  const customerName = document.getElementById('customer').value;
+  const allowed = customerName ? getAllowedFigs(customerName) : null;
   const container = document.getElementById('figurer');
   const div = document.createElement('div');
   div.className = 'figur-row';
@@ -295,7 +343,7 @@ function addFigur() {
   div.innerHTML = `
     <select name="figure_id" required style="flex:1; max-width:240px;">
       <option value="" disabled selected>— vælg figur —</option>
-      ${figOptions}
+      ${buildFigOptions(allowed)}
     </select>
     <button type="button" class="btn btn-secondary btn-sm"
             onclick="removeFigur(this)" style="padding:.3rem .7rem;">✕</button>`;
