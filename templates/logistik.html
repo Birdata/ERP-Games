@@ -7,44 +7,6 @@
   <p>Indkøbsordrer, modtagelse, lager og leveringer.</p>
 </div>
 
-{# ── 1. Kunde-godkendte ordrer → send til indkøb ─────────── #}
-<div class="section-block">
-  <div class="section-head">
-    <h2>Opret indkøbsordre</h2>
-    <span class="section-count">{{ kunde_godkendt | length }}</span>
-  </div>
-
-  {% if kunde_godkendt %}
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th>Ordre-ID</th>
-        <th>Kunde</th>
-        <th>Figur</th>
-        <th>Est. pris</th>
-        <th>Handling</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for o in kunde_godkendt %}
-      <tr>
-        <td><span class="order-id">{{ o.order_id }}</span></td>
-        <td>{{ o.customer }}</td>
-        <td>{{ o.figure_id }}</td>
-        <td class="amount">{{ "{:,.0f}".format(o.estimated_cost or 0) }} kr</td>
-        <td>
-          <form method="POST" action="{{ url_for('logistik_send_indkoeb', order_id=o.order_id) }}" style="display:inline;">
-            <button class="btn btn-primary btn-sm">Send til indkøb</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-    <p class="section-empty">Ingen godkendte ordrer afventer indkøbsordre.</p>
-  {% endif %}
-</div>
 
 {# ── 2. Klodser hentet → opgave A (betaling) + B (produktion) #}
 <div class="section-block">

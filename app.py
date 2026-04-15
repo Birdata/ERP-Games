@@ -114,7 +114,7 @@ def inject_globals():
 
     logistik_badge = db.execute(
         "SELECT COUNT(*) FROM orders WHERE status IN"
-        " ('kunde_godkendt','klodser_hentet','paa_lager')"
+        " ('klodser_hentet','paa_lager')"
         " OR (status='klar_til_produktion' AND prod_pickup_requested=1)"
         " OR (status='klar_til_afhentning' AND salg_pickup_requested=1)"
     ).fetchone()[0]
@@ -384,7 +384,7 @@ def _create_order_line(db, customer_order_no: str, customer: str, figure_id: str
 
     if new_status == "kapital_ok":
         if customer in _db.AUTO_APPROVE_CUSTOMERS:
-            _update_status(db, order_id, "kunde_godkendt")
+            _update_status(db, order_id, "indkoeb_afventer")
         else:
             _update_status(db, order_id, "pending_kunde")
 
@@ -466,8 +466,8 @@ def salg_tilfoej_produkt(ko_no):
 
 @app.post("/salg/godkend_kunde/<order_id>")
 def salg_godkend_kunde(order_id):
-    _update_status(get_db(), order_id, "kunde_godkendt")
-    flash(f"{order_id} godkendt — sendt til logistik.", "info")
+    _update_status(get_db(), order_id, "indkoeb_afventer")
+    flash(f"{order_id} godkendt — sendt direkte til indkøb.", "info")
     return redirect(url_for("salg"))
 
 
@@ -555,6 +555,10 @@ def oekonomi():
     credit_avail   = _db.available_credit(db)
     profit         = _db.profit_liquidity(db)
     total_avail    = _db.total_available(db)
+    total_costs_paid = db.execute(
+        "SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='betalt'"
+    ).fetchone()[0] or 0.0
+    margin_pct = round((profit / total_sum * 100), 1) if total_sum else 0.0
     return render_template("oekonomi.html",
                            pending_kapital=pending_kapital,
                            payments=payments,
@@ -565,7 +569,9 @@ def oekonomi():
                            credit_avail=credit_avail,
                            credit_limit=_db.CREDIT_LIMIT,
                            profit=profit,
-                           total_avail=total_avail)
+                           total_avail=total_avail,
+                           total_costs_paid=total_costs_paid,
+                           margin_pct=margin_pct)
 
 
 @app.post("/oekonomi/godkend_kapital/<order_id>")
@@ -577,7 +583,7 @@ def oekonomi_godkend_kapital(order_id):
     if row:
         customer = row["customer"]
         if customer in _db.AUTO_APPROVE_CUSTOMERS:
-            _update_status(db, order_id, "kunde_godkendt")
+            _update_status(db, order_id, "indkoeb_afventer")
         else:
             _update_status(db, order_id, "pending_kunde")
     flash(f"{order_id} kapital godkendt.", "info")
@@ -609,9 +615,6 @@ def oekonomi_betal(payment_id):
 @app.get("/logistik")
 def logistik():
     db = get_db()
-    kunde_godkendt = db.execute(
-        "SELECT * FROM orders WHERE status='kunde_godkendt' ORDER BY updated_at"
-    ).fetchall()
     klodser_hentet = db.execute(
         "SELECT * FROM orders WHERE status='klodser_hentet' ORDER BY updated_at"
     ).fetchall()
@@ -637,7 +640,6 @@ def logistik():
         components[o["order_id"]] = rows
 
     return render_template("logistik.html",
-                           kunde_godkendt=kunde_godkendt,
                            klodser_hentet=klodser_hentet,
                            pending_prod_confirm=pending_prod_confirm,
                            paa_lager=paa_lager,

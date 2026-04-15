@@ -7,6 +7,47 @@
   <p>Kassekreditcheck, betalinger og samlebog.</p>
 </div>
 
+{# ── KPI-kort ─────────────────────────────────────────────── #}
+<div class="kpi-grid" style="margin-bottom:1.5rem;">
+
+  <div class="kpi-card kpi-revenue">
+    <div class="kpi-label">Total omsætning</div>
+    <div class="kpi-value">{{ "{:,.0f}".format(total_sum) }} <span style="font-size:.9rem;">kr</span></div>
+    <div class="kpi-sub">Alle fakturerede ordrer</div>
+  </div>
+
+  <div class="kpi-card kpi-produced">
+    <div class="kpi-label">Dagens omsætning</div>
+    <div class="kpi-value">{{ "{:,.0f}".format(today_sum) }} <span style="font-size:.9rem;">kr</span></div>
+    <div class="kpi-sub">Faktureret i dag</div>
+  </div>
+
+  <div class="kpi-card kpi-pending">
+    <div class="kpi-label">Betalte omkostninger</div>
+    <div class="kpi-value">{{ "{:,.0f}".format(total_costs_paid) }} <span style="font-size:.9rem;">kr</span></div>
+    <div class="kpi-sub">Betalte leverandørregninger</div>
+  </div>
+
+  <div class="kpi-card {% if profit > 0 %}kpi-active{% else %}kpi-penalty{% endif %}">
+    <div class="kpi-label">Overskud</div>
+    <div class="kpi-value"
+         style="color:{% if profit > 0 %}var(--success){% else %}var(--danger){% endif %};">
+      {{ "{:,.0f}".format(profit) }} <span style="font-size:.9rem;">kr</span>
+    </div>
+    <div class="kpi-sub">Omsætning − omkostninger</div>
+  </div>
+
+  <div class="kpi-card kpi-stock">
+    <div class="kpi-label">Bruttomargin</div>
+    <div class="kpi-value"
+         style="color:{% if margin_pct >= 30 %}var(--success){% elif margin_pct >= 10 %}var(--warning){% else %}var(--danger){% endif %};">
+      {{ margin_pct }} <span style="font-size:.9rem;">%</span>
+    </div>
+    <div class="kpi-sub">Af total omsætning</div>
+  </div>
+
+</div>
+
 {# ── Kassekreditstatus ────────────────────────────────────── #}
 {% set used_pct = [(credit_used / credit_limit * 100) | round | int, 100] | min %}
 <div class="credit-meter">
