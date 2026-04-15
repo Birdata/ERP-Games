@@ -866,6 +866,47 @@ def qc_upload_ref(figure_id):
 
 
 # ===========================================================================
+# KUNDETILFREDSHED
+# ===========================================================================
+
+@app.get("/kundetilfredshed")
+def kundetilfredshed():
+    db = get_db()
+    log = db.execute(
+        "SELECT order_id, customer, figure_id, customer_rating, updated_at"
+        " FROM orders WHERE customer_rating IS NOT NULL"
+        " ORDER BY updated_at DESC"
+    ).fetchall()
+    avg = db.execute(
+        "SELECT ROUND(AVG(customer_rating), 2) FROM orders WHERE customer_rating IS NOT NULL"
+    ).fetchone()[0]
+    afventer_rating = db.execute(
+        "SELECT * FROM orders WHERE status='faktureret' AND customer_rating IS NULL"
+        " ORDER BY updated_at DESC"
+    ).fetchall()
+    return render_template("kundetilfredshed.html",
+                           log=log,
+                           avg_rating=avg,
+                           afventer_rating=afventer_rating)
+
+
+@app.post("/kundetilfredshed/registrer/<order_id>")
+def kundetilfredshed_registrer(order_id):
+    db = get_db()
+    rating = request.form.get("rating", "").strip()
+    if not rating.isdigit() or int(rating) not in range(1, 6):
+        flash("Rating skal være mellem 1 og 5.", "error")
+        return redirect(url_for("kundetilfredshed"))
+    db.execute(
+        "UPDATE orders SET customer_rating=?, updated_at=? WHERE order_id=?",
+        (int(rating), _now(), order_id),
+    )
+    db.commit()
+    flash(f"Rating {rating}/5 registreret for {order_id}.", "info")
+    return redirect(url_for("kundetilfredshed"))
+
+
+# ===========================================================================
 # HISTORIK
 # ===========================================================================
 

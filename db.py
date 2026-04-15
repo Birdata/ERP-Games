@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS orders (
     payment_request_sent    INTEGER DEFAULT 0,
     production_notified     INTEGER DEFAULT 0,
     produced_at             DATETIME,
+    customer_rating         INTEGER,
     created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at              DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -163,6 +164,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
     # Migrations for existing databases
     _add_column_if_missing(conn, "orders", "selling_price", "REAL")
+    _add_column_if_missing(conn, "orders", "customer_rating", "INTEGER")
 
     # Reseed component prices if the catalogue has changed (check for new varenumre)
     existing = {
