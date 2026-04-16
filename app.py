@@ -1481,10 +1481,10 @@ def ordre_detail(order_id):
     total_min = None
     if raw_events:
         try:
-            t0 = datetime.strptime(raw_events[0]["timestamp"], "%Y-%m-%d %H:%M:%S")
+            t0 = _parse_ts(raw_events[0]["timestamp"])
             t1 = datetime.now(_TZ).replace(tzinfo=None)
             total_min = int((t1 - t0).total_seconds() / 60)
-        except ValueError:
+        except (ValueError, TypeError):
             pass
 
     return render_template("ordre_detail.html",
