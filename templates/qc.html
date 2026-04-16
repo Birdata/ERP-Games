@@ -115,7 +115,7 @@
         <td>{{ o.customer }}</td>
         <td>{{ o.figure_id }}</td>
         <td style="color:var(--text-muted);font-size:.82rem;">
-          {{ o.produced_at[:16] if o.produced_at else '—' }}
+          {{ o.produced_at | datefmt if o.produced_at else '—' }}
         </td>
         <td>
           {% if o.qc_result %}

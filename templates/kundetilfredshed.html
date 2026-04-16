@@ -49,7 +49,7 @@
         <td><span class="order-id">{{ o.order_id }}</span></td>
         <td>{{ o.customer }}</td>
         <td>{{ o.figure_id }}</td>
-        <td style="color:var(--text-muted); font-size:.82rem;">{{ o.updated_at[:16] }}</td>
+        <td style="color:var(--text-muted); font-size:.82rem;">{{ o.updated_at | datefmt }}</td>
         <td>
           <form method="POST" action="{{ url_for('kundetilfredshed_registrer', order_id=o.order_id) }}"
                 style="display:flex; gap:.5rem; align-items:center;">
@@ -101,7 +101,7 @@
           </span>
           <span style="margin-left:.4rem; color:var(--text-muted); font-size:.82rem;">{{ r.customer_rating }}/5</span>
         </td>
-        <td style="color:var(--text-muted); font-size:.82rem;">{{ r.updated_at[:16] }}</td>
+        <td style="color:var(--text-muted); font-size:.82rem;">{{ r.updated_at | datefmt }}</td>
       </tr>
       {% endfor %}
     </tbody>

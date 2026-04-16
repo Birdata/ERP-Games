@@ -71,8 +71,8 @@
       <span style="font-weight:600;">{{ ko.customer_order_no }}</span>
       <span style="color:var(--text-muted); font-size:.85rem;">{{ ko.customer }}</span>
       {% if ko.expected_delivery_at %}
-        <span class="deadline-badge" data-deadline="{{ ko.expected_delivery_at }}"
-              style="font-size:.78rem;">{{ ko.expected_delivery_at[:16] }}</span>
+        <span class="deadline-badge" data-deadline="{{ ko.expected_delivery_at | datefmt('%Y-%m-%d %H:%M:%S') }}"
+              style="font-size:.78rem;">{{ ko.expected_delivery_at | datefmt }}</span>
       {% endif %}
       <span style="color:var(--text-muted); font-size:.82rem;">{{ ko.item_count }} produkt(er)</span>
       <form method="POST" action="{{ url_for('salg_tilfoej_produkt', ko_no=ko.customer_order_no) }}"
@@ -129,12 +129,12 @@
         <td class="amount">{{ "{:,.0f}".format(o.estimated_cost or 0) }} kr</td>
         <td>
           {% if o.expected_delivery_at %}
-            <span class="deadline-badge" data-deadline="{{ o.expected_delivery_at }}"
-                  style="font-size:.78rem;">{{ o.expected_delivery_at[:16] }}</span>
+            <span class="deadline-badge" data-deadline="{{ o.expected_delivery_at | datefmt('%Y-%m-%d %H:%M:%S') }}"
+                  style="font-size:.78rem;">{{ o.expected_delivery_at | datefmt }}</span>
           {% else %}—{% endif %}
         </td>
         <td style="color:var(--text-muted);font-size:.82rem;white-space:nowrap;">
-          {{ o.created_at[:16] }}
+          {{ o.created_at | datefmt }}
         </td>
         <td>
           <div class="action-group">
@@ -192,8 +192,8 @@
         </td>
         <td>
           {% if ko.expected_delivery_at %}
-            <span class="deadline-badge" data-deadline="{{ ko.expected_delivery_at }}"
-                  style="font-size:.78rem;">{{ ko.expected_delivery_at[:16] }}</span>
+            <span class="deadline-badge" data-deadline="{{ ko.expected_delivery_at | datefmt('%Y-%m-%d %H:%M:%S') }}"
+                  style="font-size:.78rem;">{{ ko.expected_delivery_at | datefmt }}</span>
           {% else %}—{% endif %}
         </td>
         <td>
@@ -247,8 +247,8 @@
           </span>
         {% endif %}
         {% if ko.expected_delivery_at %}
-          <span class="deadline-badge" data-deadline="{{ ko.expected_delivery_at }}"
-                style="font-size:.78rem;">Deadline: {{ ko.expected_delivery_at[:16] }}</span>
+          <span class="deadline-badge" data-deadline="{{ ko.expected_delivery_at | datefmt('%Y-%m-%d %H:%M:%S') }}"
+                style="font-size:.78rem;">Deadline: {{ ko.expected_delivery_at | datefmt }}</span>
         {% endif %}
       </div>
       <form method="POST" action="{{ url_for('salg_opret_faktura', ko_no=ko.customer_order_no) }}"

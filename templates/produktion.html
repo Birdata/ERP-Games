@@ -43,8 +43,8 @@
         </td>
         <td>
           {% if first.expected_delivery_at %}
-            <span class="deadline-badge" data-deadline="{{ first.expected_delivery_at }}"
-                  style="font-size:.78rem;">{{ first.expected_delivery_at[:16] }}</span>
+            <span class="deadline-badge" data-deadline="{{ first.expected_delivery_at | datefmt('%Y-%m-%d %H:%M:%S') }}"
+                  style="font-size:.78rem;">{{ first.expected_delivery_at | datefmt }}</span>
           {% else %}—{% endif %}
         </td>
         <td>
@@ -99,9 +99,9 @@
         <span style="color:var(--text-muted); font-size:.85rem;">{{ first.customer }}</span>
         <span style="font-size:.82rem; color:var(--text-muted);">{{ group | length }} produkt(er)</span>
         {% if first.expected_delivery_at %}
-          <span class="deadline-badge" data-deadline="{{ first.expected_delivery_at }}"
+          <span class="deadline-badge" data-deadline="{{ first.expected_delivery_at | datefmt('%Y-%m-%d %H:%M:%S') }}"
                 style="font-size:.78rem; margin-left:auto;">
-            {{ first.expected_delivery_at[:16] }}
+            {{ first.expected_delivery_at | datefmt }}
           </span>
         {% endif %}
       </div>

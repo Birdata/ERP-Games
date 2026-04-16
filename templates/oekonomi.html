@@ -130,7 +130,7 @@
         <td>{{ o.customer }}</td>
         <td>{{ o.figure_id }}</td>
         <td class="amount">{{ "{:,.0f}".format(o.estimated_cost or 0) }} kr</td>
-        <td style="color:var(--text-muted);font-size:.82rem;">{{ o.created_at[:16] }}</td>
+        <td style="color:var(--text-muted);font-size:.82rem;">{{ o.created_at | datefmt }}</td>
         <td>
           <div class="action-group">
             <form method="POST" action="{{ url_for('oekonomi_godkend_kapital', order_id=o.order_id) }}" style="display:inline;">
@@ -185,7 +185,7 @@
             {{ 'Betalt' if p.status == 'betalt' else 'Ikke betalt' }}
           </span>
         </td>
-        <td style="color:var(--text-muted);font-size:.82rem;">{{ p.created_at[:10] }}</td>
+        <td style="color:var(--text-muted);font-size:.82rem;">{{ p.created_at | datefmt('%Y-%m-%d') }}</td>
         <td>
           {% if p.status == 'ikke_betalt' %}
           <form method="POST" action="{{ url_for('oekonomi_betal', payment_id=p.id) }}" style="display:inline;">

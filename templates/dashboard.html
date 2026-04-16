@@ -136,14 +136,14 @@
           {% if o.customer_order_no %}
             {# deadline fetched from join — injected by route or shown blank #}
             <span class="deadline-badge"
-                  data-deadline="{{ o.expected_delivery_at if o.expected_delivery_at is defined else '' }}"
+                  data-deadline="{{ (o.expected_delivery_at | datefmt('%Y-%m-%d %H:%M:%S')) if o.expected_delivery_at is defined and o.expected_delivery_at else '' }}"
                   style="font-size:.78rem;">
-              {{ o.expected_delivery_at[:16] if o.expected_delivery_at is defined and o.expected_delivery_at else '—' }}
+              {{ (o.expected_delivery_at | datefmt) if o.expected_delivery_at is defined and o.expected_delivery_at else '—' }}
             </span>
           {% else %}—{% endif %}
         </td>
         <td style="color:var(--text-muted); font-size:.82rem; white-space:nowrap;">
-          {{ o.updated_at[:16] if o.updated_at else '—' }}
+          {{ o.updated_at | datefmt if o.updated_at else '—' }}
         </td>
       </tr>
       {% endfor %}

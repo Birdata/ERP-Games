@@ -60,10 +60,10 @@
           {% endif %}
         </td>
         <td style="color:var(--text-muted); font-size:.78rem; white-space:nowrap;">
-          {{ o.created_at[:16] if o.created_at else '—' }}
+          {{ o.created_at | datefmt if o.created_at else '—' }}
         </td>
         <td style="color:var(--text-muted); font-size:.78rem; white-space:nowrap;">
-          {{ o.updated_at[:16] if o.updated_at else '—' }}
+          {{ o.updated_at | datefmt if o.updated_at else '—' }}
         </td>
       </tr>
       {% endfor %}

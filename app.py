@@ -22,6 +22,25 @@ from data.references import REFERENCE_SEQUENCES
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-in-prod")
 
+
+_FMT_LENGTHS = {
+    "%Y-%m-%d": 10,
+    "%Y-%m-%d %H:%M": 16,
+    "%Y-%m-%d %H:%M:%S": 19,
+}
+
+
+@app.template_filter("datefmt")
+def _datefmt(value, fmt="%Y-%m-%d %H:%M"):
+    """Format a datetime object or ISO string for display in templates."""
+    if value is None:
+        return ""
+    if hasattr(value, "strftime"):
+        return value.strftime(fmt)
+    if isinstance(value, str):
+        return value[:_FMT_LENGTHS.get(fmt, 16)]
+    return str(value)
+
 CAMERA_INDEX = int(os.environ.get("CAMERA_INDEX", 1))
 
 # Folder where one reference image per figure is stored
@@ -298,8 +317,8 @@ def api_kpis():
         "SELECT COUNT(*) FROM orders WHERE status='paa_lager'"
     ).fetchone()[0]
     produced_today = db.execute(
-        "SELECT COUNT(*) FROM orders WHERE produced_at LIKE ?",
-        (f"{today}%",),
+        "SELECT COUNT(*) FROM orders WHERE produced_at::date = ?",
+        (today,),
     ).fetchone()[0]
     todays_revenue = db.execute(
         "SELECT COALESCE(SUM(amount),0) FROM invoices WHERE invoice_date=?",
@@ -307,7 +326,7 @@ def api_kpis():
     ).fetchone()[0]
     todays_supplier_costs = db.execute(
         "SELECT COALESCE(SUM(amount), 0) FROM payments"
-        " WHERE DATE(created_at) = ?",
+        " WHERE created_at::date = ?",
         (today,),
     ).fetchone()[0]
     todays_profit = round(todays_revenue - todays_supplier_costs, 0)
@@ -332,7 +351,7 @@ def api_kpis():
         " WHERE co.expected_delivery_at IS NOT NULL"
         "   AND co.expected_delivery_at < ?"
         "   AND o.status NOT IN ('faktureret','afvist')"
-        " GROUP BY co.customer_order_no",
+        " GROUP BY co.id, co.customer_order_no, co.expected_delivery_at, co.customer",
         (now_str,),
     ).fetchall()
 
@@ -340,7 +359,9 @@ def api_kpis():
     overdue_list  = []
     for row in overdue_rows:
         try:
-            deadline = datetime.strptime(row["expected_delivery_at"], "%Y-%m-%d %H:%M:%S")
+            dl = row["expected_delivery_at"]
+            deadline = dl if isinstance(dl, datetime) else datetime.strptime(dl, "%Y-%m-%d %H:%M:%S")
+            deadline = deadline.replace(tzinfo=None)
             now_dt   = datetime.now(_TZ).replace(tzinfo=None)
             mins_late = max(0, int((now_dt - deadline).total_seconds() / 60))
         except (ValueError, TypeError):
@@ -424,7 +445,7 @@ def salg():
         " FROM customer_orders co"
         " LEFT JOIN orders o ON o.customer_order_no = co.customer_order_no"
         " WHERE co.expected_delivery_at > ? OR co.expected_delivery_at IS NULL"
-        " GROUP BY co.customer_order_no"
+        " GROUP BY co.id"
         " ORDER BY co.created_at DESC LIMIT 20",
         (_now(),),
     ).fetchall()
@@ -1388,10 +1409,12 @@ def kundeordre_detail(ko_no):
     mins_late = 0
     if ko["expected_delivery_at"]:
         try:
-            deadline = datetime.strptime(ko["expected_delivery_at"], "%Y-%m-%d %H:%M:%S")
+            dl = ko["expected_delivery_at"]
+            deadline = dl if isinstance(dl, datetime) else datetime.strptime(dl, "%Y-%m-%d %H:%M:%S")
+            deadline = deadline.replace(tzinfo=None)
             now_dt   = datetime.now(_TZ).replace(tzinfo=None)
             mins_late = max(0, int((now_dt - deadline).total_seconds() / 60))
-        except ValueError:
+        except (ValueError, TypeError):
             pass
 
     all_done = all(o["status"] in ("faktureret", "afvist") for o in items)
@@ -1423,18 +1446,23 @@ def ordre_detail(order_id):
 
     # Calculate time spent in each step
     events = []
+    def _parse_ts(val):
+        if isinstance(val, datetime):
+            return val.replace(tzinfo=None)
+        return datetime.strptime(val, "%Y-%m-%d %H:%M:%S")
+
     for i, ev in enumerate(raw_events):
         try:
-            t_start = datetime.strptime(ev["timestamp"], "%Y-%m-%d %H:%M:%S")
-        except ValueError:
+            t_start = _parse_ts(ev["timestamp"])
+        except (ValueError, TypeError):
             t_start = None
 
         duration_min = None
         if i + 1 < len(raw_events) and t_start:
             try:
-                t_next = datetime.strptime(raw_events[i + 1]["timestamp"], "%Y-%m-%d %H:%M:%S")
+                t_next = _parse_ts(raw_events[i + 1]["timestamp"])
                 duration_min = int((t_next - t_start).total_seconds() / 60)
-            except ValueError:
+            except (ValueError, TypeError):
                 pass
         elif i == len(raw_events) - 1 and t_start:
             # Last event: time until now

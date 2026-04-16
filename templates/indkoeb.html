@@ -27,8 +27,8 @@
         <span>{{ ko.customer }}</span>
         <span class="pill pill-indkoeb_afventer">{{ orders | length }} produkt(er)</span>
         {% if ko.expected_delivery_at %}
-          <span class="deadline-badge" data-deadline="{{ ko.expected_delivery_at }}"
-                style="font-size:.78rem;">{{ ko.expected_delivery_at[:16] }}</span>
+          <span class="deadline-badge" data-deadline="{{ ko.expected_delivery_at | datefmt('%Y-%m-%d %H:%M:%S') }}"
+                style="font-size:.78rem;">{{ ko.expected_delivery_at | datefmt }}</span>
         {% endif %}
       </div>
 

@@ -28,7 +28,7 @@
 
   <div class="kpi-card">
     <div class="kpi-label">Oprettet</div>
-    <div class="kpi-value" style="font-size:1rem;">{{ ko.created_at[:16] }}</div>
+    <div class="kpi-value" style="font-size:1rem;">{{ ko.created_at | datefmt }}</div>
     <div class="kpi-sub">Tidspunkt</div>
   </div>
 
@@ -36,7 +36,7 @@
     <div class="kpi-label">Forventet levering</div>
     {% if ko.expected_delivery_at %}
       <div class="kpi-value" style="font-size:1rem;" id="ko-deadline">
-        {{ ko.expected_delivery_at[:16] }}
+        {{ ko.expected_delivery_at | datefmt }}
       </div>
       <div class="kpi-sub" id="ko-countdown">beregner…</div>
     {% else %}
@@ -115,10 +115,10 @@
           {% endif %}
         </td>
         <td style="color:var(--text-muted);font-size:.78rem;white-space:nowrap;">
-          {{ o.created_at[:16] }}
+          {{ o.created_at | datefmt }}
         </td>
         <td style="color:var(--text-muted);font-size:.78rem;white-space:nowrap;">
-          {{ o.updated_at[:16] }}
+          {{ o.updated_at | datefmt }}
         </td>
       </tr>
       {% endfor %}
